@@ -29,7 +29,7 @@ The install path has been verified end-to-end in a **clean, isolated environment
 2. Switch to the **Plugins** tab (套件)
 3. Click the **＋** button to the right of the marketplace tabs — its tooltip reads "Add Marketplace" (添加市场)
 4. Enter `Snow7-G/wb-credits` as the marketplace source and submit
-5. Find `wb-credits` in the list and install it
+5. Find the `wb-credits` card and click the **＋** on its right to install
 
 Then **start a new conversation**.
 
