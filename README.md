@@ -18,6 +18,12 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 
 ## 安装
 
+**WorkBuddy 桌面端**：在插件管理页把本仓库目录添加为本地市场，安装 `wb-credits`，然后新开一个对话。
+
+桌面端不实现 `/plugin` 系列斜杠命令——敲在聊天框里会被当作普通消息。同样地，`/reload-plugins` 在桌面端也无效，插件配置只在会话启动时读取，所以要**新开对话或重启**才能加载。
+
+**CodeBuddy Code（CLI）**：
+
 ```
 /plugin marketplace add Snow7-G/wb-credits
 /plugin install wb-credits@snow7g
@@ -29,6 +35,8 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 ```
 /plugin marketplace add /path/to/wb-credits
 ```
+
+**怎么确认装上了**：尝试调用技能名 `wb-credits`。返回 `Can not find skill` 就是没加载，新开一个对话再试。
 
 ## 用法
 
