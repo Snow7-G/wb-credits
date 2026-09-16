@@ -14,11 +14,13 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(ROOT, "plugins", "wb-credits", "skills", "wb-credits", "scripts")
@@ -251,6 +253,45 @@ def test_static():
     for rel in ("commands/credits.md", "skills/wb-credits/SKILL.md"):
         path = os.path.join(target, rel)
         check("组件存在 %s" % rel, os.path.isfile(path), path)
+
+    # README 里引用的图必须真的存在，且是合法 SVG。
+    # 图挂掉在网页上只是显示不出来，不会报错——正是最容易被忽略的那种坏。
+    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:
+        readme = handle.read()
+    refs = re.findall(r'srcset="([^"]+)"|src="([^"]+)"', readme)
+    refs = [a or b for a, b in refs]
+    refs = [r for r in refs if not r.startswith("http")]
+    check("README 引用了卡片图", len(refs) >= 2, str(refs))
+    for rel in refs:
+        path = os.path.join(ROOT, rel)
+        exists = os.path.isfile(path)
+        check("README 引用的图存在 %s" % rel, exists, path)
+        if not exists:
+            continue
+        try:
+            xml.etree.ElementTree.parse(path)
+            check("图是合法 SVG %s" % rel, True)
+        except xml.etree.ElementTree.ParseError as exc:
+            check("图是合法 SVG %s" % rel, False, str(exc))
+
+    # 两版图的尺寸必须一致，否则切换主题时卡片会跳一下
+    sizes = []
+    for rel in refs:
+        path = os.path.join(ROOT, rel)
+        if os.path.isfile(path):
+            root = xml.etree.ElementTree.parse(path).getroot()
+            sizes.append((root.get("width"), root.get("height")))
+    check("浅色与深色图尺寸一致", len(set(sizes)) <= 1, str(sizes))
+
+    # 图必须与生成脚本同步。用 --check 校验，不写文件——
+    # 测试不该改动工作区。
+    gen = os.path.join(ROOT, "docs", "make_card.py")
+    check("卡片图生成脚本存在", os.path.isfile(gen), gen)
+    if os.path.isfile(gen):
+        result = subprocess.run([PY, gen, "--check"],
+                                capture_output=True, text=True, cwd=ROOT)
+        check("卡片图与生成脚本一致", result.returncode == 0,
+              (result.stdout + result.stderr).strip()[:160])
 
     with open(os.path.join(target, "commands/credits.md"), encoding="utf-8") as handle:
         body = handle.read()
