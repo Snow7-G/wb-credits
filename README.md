@@ -2,6 +2,8 @@
 
 [![tests](https://github.com/Snow7-G/wb-credits/actions/workflows/tests.yml/badge.svg)](https://github.com/Snow7-G/wb-credits/actions/workflows/tests.yml)
 
+**中文** | [English](README.en.md)
+
 按**会话**查看 WorkBuddy 的积分消耗。
 
 官方的「套餐与用量」页只有总量和逐条请求明细，回答不了"这个对话到底花了多少"。这个插件读本机数据，把一个会话下所有请求的积分加总，补上这块空白。
@@ -127,7 +129,7 @@ python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --all --forma
 python3 tests/test_wb_credits.py
 ```
 
-208 项检查，覆盖数据层、计算层、呈现层、命令行、参数边界与错误路径。
+228 项检查，覆盖数据层、计算层、呈现层、命令行、参数边界与错误路径。这个数字由测试自己校验——写错了 CI 会红。
 
 **测试是自包含的**：全部跑在临时构造的假数据上，不读也不写你的真实数据，所以在任何机器上结果都一样。CI 在 Python 3.9 与 3.13 上各跑一遍——这两个版本是本地实跑验证过的上下界（3.14 也通过）。
 

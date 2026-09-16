@@ -256,27 +256,51 @@ def test_static():
 
     # README 里引用的图必须真的存在，且是合法 SVG。
     # 图挂掉在网页上只是显示不出来，不会报错——正是最容易被忽略的那种坏。
-    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:
-        readme = handle.read()
-    refs = re.findall(r'srcset="([^"]+)"|src="([^"]+)"', readme)
-    refs = [a or b for a, b in refs]
-    refs = [r for r in refs if not r.startswith("http")]
-    check("README 引用了卡片图", len(refs) >= 2, str(refs))
-    for rel in refs:
-        path = os.path.join(ROOT, rel)
-        exists = os.path.isfile(path)
-        check("README 引用的图存在 %s" % rel, exists, path)
-        if not exists:
+    readmes = ["README.md", "README.en.md"]
+    all_refs = []
+    for name in readmes:
+        path = os.path.join(ROOT, name)
+        check("%s 存在" % name, os.path.isfile(path), path)
+        if not os.path.isfile(path):
             continue
-        try:
-            xml.etree.ElementTree.parse(path)
-            check("图是合法 SVG %s" % rel, True)
-        except xml.etree.ElementTree.ParseError as exc:
-            check("图是合法 SVG %s" % rel, False, str(exc))
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+        refs = re.findall(r'srcset="([^"]+)"|src="([^"]+)"', body)
+        refs = [a or b for a, b in refs]
+        refs = [r for r in refs if not r.startswith("http")]
+        check("%s 引用了卡片图" % name, len(refs) >= 2, str(refs))
+        for rel in refs:
+            # 别用 target 这个名字，下面还要指插件目录
+            image_path = os.path.join(ROOT, rel)
+            exists = os.path.isfile(image_path)
+            check("%s 引用的图存在 %s" % (name, rel), exists, image_path)
+            if not exists:
+                continue
+            try:
+                xml.etree.ElementTree.parse(image_path)
+                check("图是合法 SVG %s" % rel, True)
+            except xml.etree.ElementTree.ParseError as exc:
+                check("图是合法 SVG %s" % rel, False, str(exc))
+        all_refs.append(refs)
+
+    # 两份 README 必须互链，语言切换不能断
+    def linked(name, other):
+        if not os.path.isfile(os.path.join(ROOT, name)):
+            return False
+        with open(os.path.join(ROOT, name), encoding="utf-8") as handle:
+            return other in handle.read()
+
+    check("中文版链到英文版", linked("README.md", "README.en.md"))
+    check("英文版链到中文版", linked("README.en.md", "README.md"))
+
+    # 两份 README 用同一组图，避免一版改了另一版没跟上
+    if len(all_refs) == 2:
+        check("两份 README 引用同一组图", set(all_refs[0]) == set(all_refs[1]),
+              "%s vs %s" % (all_refs[0], all_refs[1]))
 
     # 两版图的尺寸必须一致，否则切换主题时卡片会跳一下
     sizes = []
-    for rel in refs:
+    for rel in all_refs[0] if all_refs else []:
         path = os.path.join(ROOT, rel)
         if os.path.isfile(path):
             root = xml.etree.ElementTree.parse(path).getroot()
@@ -1051,6 +1075,29 @@ def test_cli_limits():
 
 # --------------------------------------------------------------------------
 
+def verify_readme_counts():
+    """两份 README 里写的测试项数必须与实际一致。
+
+    放在最后跑，因为要先知道总数。加了几条检查却忘了改 README，
+    是那种没人会发现的漂移——数字看着挺具体，其实是旧的。
+    """
+    readmes = ["README.md", "README.en.md"]
+    # 本函数自己也要产出 len(readmes) 条检查，先把它算进去
+    total = len(PASSED) + len(FAILED) + len(readmes)
+
+    for name in readmes:
+        path = os.path.join(ROOT, name)
+        if not os.path.isfile(path):
+            check("%s 存在（校验项数用）" % name, False, path)
+            continue
+        with open(path, encoding="utf-8") as handle:
+            body = handle.read()
+        match = re.search(r"(\d{2,4})\s*(?:项检查|checks)", body)
+        stated = int(match.group(1)) if match else None
+        check("%s 写的项数与实际一致（%d）" % (name, total),
+              stated == total, "写的是 %s" % stated)
+
+
 def main():
     print("=" * 60)
     print("wb-credits 全量测试")
@@ -1067,6 +1114,8 @@ def main():
             FAILED.append((test.__name__, "测试函数自身抛异常"))
             print("  FAIL  %s 抛异常：%s" % (test.__name__, exc))
             traceback.print_exc()
+
+    verify_readme_counts()
 
     print("\n" + "=" * 60)
     print("通过 %d 项，失败 %d 项" % (len(PASSED), len(FAILED)))
