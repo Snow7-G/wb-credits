@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sqlite3
+import time
 
 DEFAULT_CONFIG_DIRS = (
     os.path.expanduser("~/.workbuddy"),
@@ -258,6 +259,80 @@ class Store(object):
                     continue
                 if ts > 0:
                     out[rid] = ts
+
+
+    # -- token 明细（traces）-------------------------------------------------
+
+    def trace_tokens(self, max_age_days=None):
+        """从 traces/ 聚合 token 用量，按 sessionId 分组。
+
+        数据源是 `<配置目录>/traces/<pid>/trace_*.json`。文件名不含会话 ID，
+        必须逐个读进来才能按会话聚合。实测全量扫描约 1 秒（562 个文件 / 454 MB），
+        且随使用时间线性增长，所以默认不读，由上层按需触发。
+
+        max_age_days 非空时只扫最近这些天改动过的文件。
+        """
+        base = os.path.join(self.config_dir, "traces")
+        out = {}
+        if not os.path.isdir(base):
+            return out
+
+        cutoff = None
+        if max_age_days is not None:
+            cutoff = time.time() - max_age_days * 86400
+
+        for path in glob.glob(os.path.join(base, "*", "trace_*.json")):
+            if cutoff is not None:
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        continue
+                except OSError:
+                    continue
+            self._scan_trace(path, out)
+        return out
+
+    @staticmethod
+    def _scan_trace(path, out):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+
+        trace = data.get("trace")
+        if not isinstance(trace, dict):
+            return
+        info = trace.get("modelInfo")
+        if not isinstance(info, dict):
+            return
+        session_id = trace.get("sessionId")
+        if not session_id:
+            return
+
+        total_in = _as_int(info.get("totalInputTokens"))
+        cached = _as_int(info.get("totalCachedTokens"))
+        if cached > total_in:
+            cached = total_in
+        total_out = _as_int(info.get("totalOutputTokens"))
+
+        entry = out.setdefault(
+            session_id,
+            {"input": 0, "cached": 0, "uncached": 0, "output": 0, "traces": 0},
+        )
+        entry["input"] += total_in
+        entry["cached"] += cached
+        entry["uncached"] += total_in - cached
+        entry["output"] += total_out
+        entry["traces"] += 1
+
+
+def _as_int(value):
+    """token 字段容错：非数值当 0。布尔值要排除，bool 是 int 的子类。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
 
 
 def current_session_id():

@@ -19,11 +19,33 @@ python3 scripts/wb_credits.py --all --format text    # 全部会话排行
 python3 scripts/wb_credits.py -k 关键词               # 按标题过滤，配合 --all
 python3 scripts/wb_credits.py --detail               # 附加逐次明细
 python3 scripts/wb_credits.py --session <会话ID>      # 指定会话
+python3 scripts/wb_credits.py --tokens               # 附加 token 拆分（扫描 traces，约 1 秒）
+python3 scripts/wb_credits.py --tokens --estimate    # 再加三类 token 的积分估算
 ```
 
 三种输出格式：`json`（含数据与卡片 HTML）、`text`（等宽纯文本）、`card`（仅 HTML）。
 
 若插件根目录环境变量不可用，用 Glob 搜索 `wb_credits.py` 定位后以绝对路径执行。
+
+## token 拆分（--tokens）
+
+数据源是 `<配置目录>/traces/<pid>/trace_*.json`，其中的 `modelInfo` 有 `totalInputTokens` / `totalCachedTokens` / `totalOutputTokens`。
+
+**两个必须知道的事实：**
+
+**没有「思考」token。** trace 的全部字段里不存在 reason / think / thought 相关项。用户若要求"思考用了多少"，如实说明拿不到，不要编。
+
+**读取很慢。** 文件名不含会话 ID，必须逐个读进来才能按会话聚合。实测 562 个文件 / 454 MB 要 **约 1 秒**，且随使用时间线性增长。所以默认关闭，只有用户明确要看 token 时才加 `--tokens`。
+
+拆分展示三项：
+
+| 项 | 含义 |
+|---|---|
+| 未缓存输入 | `input - cached`，按全价计费的部分 |
+| 缓存命中 | `cached`，按折扣价计费 |
+| 输出 | `output` |
+
+**`--estimate` 的结果是估算，不是实测。** 它按假设的单价比例（未缓存输入 1、缓存 0.1、输出 3）把总积分分摊到三类。比例是行业经验值，随模型变化，未做校准。对外说明时必须标注"估算"，不能说成实测值。
 
 ## 呈现
 

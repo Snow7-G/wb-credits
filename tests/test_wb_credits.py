@@ -583,6 +583,142 @@ def test_cross_check():
 
 
 # --------------------------------------------------------------------------
+# 12. token 拆分
+# --------------------------------------------------------------------------
+
+def test_tokens():
+    print("\n[12] token 拆分")
+
+    check("小数值原样显示", metrics.fmt_tokens(9999) == "9999")
+    check("上万显示为万", metrics.fmt_tokens(12345) == "1 万", metrics.fmt_tokens(12345))
+    check("过亿显示为亿", metrics.fmt_tokens(123456789) == "1.2 亿", metrics.fmt_tokens(123456789))
+
+    raw = {"input": 1000, "cached": 900, "uncached": 100, "output": 50, "traces": 3}
+    ts = metrics.token_summary(raw)
+    check("token_summary 保留各项", ts["input"] == 1000 and ts["output"] == 50)
+    check("缓存比例计算正确", abs(ts["cached_ratio"] - 0.9) < 1e-9)
+    check("空输入返回 None", metrics.token_summary(None) is None)
+    check("input 为 0 时比例不除零", metrics.token_summary({"input": 0})["cached_ratio"] == 0.0)
+
+    est = metrics.estimate_credits(ts, 100.0)
+    check("估算三项之和等于总积分", abs(sum(est.values()) - 100.0) < 0.01, str(est))
+    check("估算三项均为正", all(v > 0 for v in est.values()))
+    check("全零 token 时估算为 None",
+          metrics.estimate_credits({"uncached": 0, "cached": 0, "output": 0}, 10.0) is None)
+
+    tmp = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "token 测试", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    tdir = os.path.join(tmp, "traces", "12345")
+    os.makedirs(tdir, exist_ok=True)
+
+    def write_trace(name, body):
+        with open(os.path.join(tdir, name), "w", encoding="utf-8") as handle:
+            json.dump({"trace": body}, handle)
+
+    def model_info(sid, inp, cached, out):
+        return {"sessionId": sid, "modelInfo": {
+            "totalInputTokens": inp, "totalCachedTokens": cached, "totalOutputTokens": out}}
+
+    write_trace("trace_1.json", model_info("s1", 1000, 900, 50))
+    write_trace("trace_2.json", model_info("s1", 500, 400, 20))
+    write_trace("trace_other.json", model_info("s2", 9999, 0, 9999))
+    write_trace("trace_noinfo.json", {"sessionId": "s1"})
+    with open(os.path.join(tdir, "trace_broken.json"), "w", encoding="utf-8") as handle:
+        handle.write("{ 不是 JSON")
+    with open(os.path.join(tdir, "trace_junk.json"), "w", encoding="utf-8") as handle:
+        handle.write("[1, 2, 3]")
+
+    store = data.Store(config_dir=tmp)
+    agg = store.trace_tokens()
+    check("按会话聚合", "s1" in agg and "s2" in agg)
+    check("input 求和正确", agg["s1"]["input"] == 1500, str(agg.get("s1")))
+    check("cached 求和正确", agg["s1"]["cached"] == 1300)
+    check("uncached 为差值", agg["s1"]["uncached"] == 200)
+    check("output 求和正确", agg["s1"]["output"] == 70)
+    check("只统计含 modelInfo 的 trace", agg["s1"]["traces"] == 2, str(agg["s1"]["traces"]))
+    store.close()
+
+    tmp2 = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    d2 = os.path.join(tmp2, "traces", "1")
+    os.makedirs(d2, exist_ok=True)
+    with open(os.path.join(d2, "trace_x.json"), "w", encoding="utf-8") as handle:
+        json.dump({"trace": {"sessionId": "s1", "modelInfo": {
+            "totalInputTokens": 100, "totalCachedTokens": 999,
+            "totalOutputTokens": 5}}}, handle)
+    store = data.Store(config_dir=tmp2)
+    agg = store.trace_tokens()
+    check("cached 超过 input 时被截断", agg["s1"]["cached"] == 100, str(agg.get("s1")))
+    check("截断后 uncached 不为负", agg["s1"]["uncached"] == 0)
+    store.close()
+
+    tmp3 = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    store = data.Store(config_dir=tmp3)
+    check("无 traces 目录返回空字典", store.trace_tokens() == {})
+    store.close()
+
+    base = metrics.summarize({"a": 1.0, "b": 2.0, "c": 3.0}, used=1000)
+    check("无 token 时卡片不含 token 块", "未缓存输入" not in render.card(base))
+    check("无 token 时纯文本不含 token 行", "未缓存输入" not in render.text(base))
+
+    base["tokens"] = metrics.token_summary(raw)
+    card = render.card(base)
+    check("卡片含三项标签",
+          "未缓存输入" in card and "缓存命中" in card and "输出" in card)
+    check("卡片不含「思考」字样", "思考" not in card)
+    check("纯文本含 token 行", "未缓存输入" in render.text(base))
+
+    base["tokens"]["estimate"] = metrics.estimate_credits(base["tokens"], 6.0)
+    check("带估算时卡片出现估算行", "按比例估算" in render.card(base))
+    check("带估算时纯文本出现估算行", "按比例估算" in render.text(base))
+
+
+def test_cli_tokens():
+    print("\n[13] 命令行 · token 开关")
+
+    payload = json.loads(run_cli(["--format", "json"]).stdout)
+    check("默认不返回 tokens 字段", "tokens" not in payload["summary"])
+
+    result = run_cli(["--format", "json", "--tokens"])
+    check("--tokens 执行成功", result.returncode == 0, result.stderr[:100])
+    payload = json.loads(result.stdout)
+    check("--tokens 后含 tokens 字段", "tokens" in payload["summary"])
+    tokens = payload["summary"].get("tokens")
+    if tokens:
+        check("token 含三项", all(k in tokens for k in ("uncached", "cached", "output")))
+        check("token 值为非负整数",
+              all(isinstance(tokens[k], int) and tokens[k] >= 0
+                  for k in ("uncached", "cached", "output")), str(tokens))
+
+    payload = json.loads(run_cli(["--format", "json", "--tokens", "--estimate"]).stdout)
+    est = payload["summary"].get("tokens", {}).get("estimate")
+    check("--estimate 产出估算", est is not None)
+    if est:
+        total = payload["summary"]["total"]
+        check("估算之和接近总积分",
+              abs(sum(est.values()) - total) < max(0.5, total * 0.01),
+              "%s vs %.2f" % (est, total))
+
+    check("text 模式含 token 行",
+          "未缓存输入" in run_cli(["--format", "text", "--tokens"]).stdout)
+    check("card 模式含 token 块",
+          "未缓存输入" in run_cli(["--format", "card", "--tokens"]).stdout)
+
+    payload = json.loads(run_cli(["--format", "json", "--estimate"]).stdout)
+    check("只给 --estimate 时不产出", "tokens" not in payload["summary"])
+
+    result = run_cli(["--all", "--format", "json", "--tokens"])
+    check("--all 与 --tokens 同用不报错", result.returncode == 0, result.stderr[:100])
+
+
+# --------------------------------------------------------------------------
 # 10. 健壮性
 # --------------------------------------------------------------------------
 
@@ -666,7 +802,8 @@ def main():
 
     for test in (test_static, test_data_normal, test_data_errors, test_metrics,
                  test_anomaly, test_render, test_cli, test_cli_errors,
-                 test_cross_check, test_robustness, test_cli_limits):
+                 test_cross_check, test_robustness, test_cli_limits,
+                 test_tokens, test_cli_tokens):
         try:
             test()
         except Exception as exc:  # noqa: BLE001

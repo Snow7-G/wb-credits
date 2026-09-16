@@ -41,6 +41,16 @@ def build_parser():
     parser.add_argument("-k", "--kw", help="按会话标题过滤，配合 --all 使用")
     parser.add_argument("--session", help="指定会话 ID，默认取当前会话")
     parser.add_argument("--detail", action="store_true", help="展开逐次请求明细")
+    parser.add_argument(
+        "--tokens",
+        action="store_true",
+        help="附加 token 拆分（未缓存输入/缓存命中/输出）。需扫描 traces 目录，约 1 秒",
+    )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        help="按假设单价估算三类 token 的积分构成，需与 --tokens 同用。结果为估算值",
+    )
     parser.add_argument("--limit", type=int, default=15, help="排行显示条数")
     parser.add_argument(
         "--format",
@@ -87,6 +97,14 @@ def run_session(args, store, sessions):
     )
     meta = sessions.get(session_id) or {}
     detail = metrics.detail_lines(usage["credits"])
+
+    if args.tokens:
+        raw = store.trace_tokens().get(session_id)
+        tokens = metrics.token_summary(raw)
+        if tokens:
+            if args.estimate:
+                tokens["estimate"] = metrics.estimate_credits(tokens, summary["total"])
+            summary["tokens"] = tokens
 
     payload = {
         "ok": True,

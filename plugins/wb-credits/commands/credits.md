@@ -1,6 +1,6 @@
 ---
 description: 查看本对话或全部会话的积分消耗
-argument-hint: [--all] [-k 关键词] [--detail]
+argument-hint: [--all] [-k 关键词] [--detail] [--tokens] [--estimate]
 ---
 
 用户想查看积分消耗，附加参数为 `$ARGUMENTS`。按下面三步执行，不要跳步。
@@ -18,6 +18,10 @@ argument-hint: [--all] [-k 关键词] [--detail]
 - 含 `--all` → 全部会话排行：`--all --format json --limit 15`
 - 含 `-k 关键词` → 附加 `-k 关键词`
 - 含 `--detail` → 附加 `--detail`
+- 含 `--tokens` → 附加 `--tokens`。**这会扫描 traces 目录，约需 1 秒**，是用户主动要看 token 明细才加，不要默认带上
+- 含 `--estimate` → 与 `--tokens` 同用，附加积分估算
+
+用户提到"token"「输入输出」「缓存」这类词时，加 `--tokens`；再提到"占多少积分""换算"时，加 `--estimate`。
 
 参数不属于以上任何一种时（比如只写了个数字，或是一句自然语言），先弄清用户想干什么再执行，不要静默忽略、也不要硬套默认分支。拿不准就问一句。
 

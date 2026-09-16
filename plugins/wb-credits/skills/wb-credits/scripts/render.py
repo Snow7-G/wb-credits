@@ -16,7 +16,7 @@ CARD_TEMPLATE = """<div style="background:var(--color-background-secondary);bord
       <div style="font-size:12px;color:var(--color-text-secondary);">本对话</div>
       <div style="font-size:30px;font-weight:500;color:var(--color-text-primary);line-height:1.1;margin-top:12px;">{total}</div>
       <div style="font-size:12px;color:var(--color-text-tertiary);margin-top:10px;">积分｜{rounds} 轮｜上下文 {context}</div>
-    </div>
+{token_block}    </div>
     <div style="padding-left:30px;border-left:0.5px solid var(--color-border-tertiary);">
       <div style="font-size:12px;color:var(--color-text-secondary);">最近三轮</div>
       <div style="font-size:15px;color:var(--color-text-primary);margin-top:14px;">{recent}</div>
@@ -46,8 +46,39 @@ def card(summary):
         context=metrics.fmt_context(summary["used"]),
         recent=_join(summary["recent"]),
         forecast_label=label,
+        token_block=_token_block(summary.get("tokens")),
         footer=footer,
     )
+
+
+TOKEN_ROW = '        <div style="display:flex;justify-content:space-between;gap:12px;"><span>{label}</span><span style="color:var(--color-text-secondary);">{value}</span></div>\n'
+
+TOKEN_BLOCK = """      <div style="font-size:12px;color:var(--color-text-tertiary);margin-top:14px;line-height:1.95;">
+{rows}      </div>
+"""
+
+
+def _token_block(tokens):
+    """左下方的 token 拆分。未提供时返回空串，卡片退回原样。"""
+    if not tokens:
+        return ""
+    rows = [
+        TOKEN_ROW.format(label="未缓存输入", value=metrics.fmt_tokens(tokens["uncached"])),
+        TOKEN_ROW.format(label="缓存命中", value=metrics.fmt_tokens(tokens["cached"])),
+        TOKEN_ROW.format(label="输出", value=metrics.fmt_tokens(tokens["output"])),
+    ]
+
+    estimate = tokens.get("estimate")
+    if estimate:
+        rows.append(
+            TOKEN_ROW.format(
+                label="按比例估算",
+                value="%.0f / %.0f / %.0f 积分" % (
+                    estimate["uncached"], estimate["cached"], estimate["output"]
+                ),
+            )
+        )
+    return TOKEN_BLOCK.format(rows="".join(rows))
 
 
 def _forecast_label(forecast):
@@ -73,6 +104,25 @@ def text(summary):
 
     column = 34
     lines = [_pad(left[i], column) + right[i] for i in range(3)]
+
+    tokens = summary.get("tokens")
+    if tokens:
+        lines.append("")
+        lines.append(
+            "未缓存输入 %s ｜ 缓存命中 %s ｜ 输出 %s"
+            % (
+                metrics.fmt_tokens(tokens["uncached"]),
+                metrics.fmt_tokens(tokens["cached"]),
+                metrics.fmt_tokens(tokens["output"]),
+            )
+        )
+        estimate = tokens.get("estimate")
+        if estimate:
+            lines.append(
+                "按比例估算 %.0f / %.0f / %.0f 积分"
+                % (estimate["uncached"], estimate["cached"], estimate["output"])
+            )
+
     if summary.get("anomaly"):
         lines.append("")
         lines.append(summary["anomaly"])

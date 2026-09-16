@@ -145,3 +145,51 @@ def fmt_context(used):
     if used >= 10000:
         return "%.0f 万" % (used / 10000.0)
     return "%d" % used
+
+
+def fmt_tokens(count):
+    """token 数格式化。上亿用「亿」，上万用「万」，避免长串数字。"""
+    if count >= 100000000:
+        return "%.1f 亿" % (count / 100000000.0)
+    if count >= 10000:
+        return "%.0f 万" % (count / 10000.0)
+    return "%d" % count
+
+
+def token_summary(raw):
+    """整理单会话的 token 用量。raw 来自 data.Store.trace_tokens()。"""
+    if not raw:
+        return None
+    total_in = raw.get("input", 0)
+    cached = raw.get("cached", 0)
+    return {
+        "input": total_in,
+        "cached": cached,
+        "uncached": raw.get("uncached", 0),
+        "output": raw.get("output", 0),
+        "traces": raw.get("traces", 0),
+        "cached_ratio": (cached / float(total_in)) if total_in else 0.0,
+    }
+
+
+# 假设的单价比例，以「未缓存输入」为 1。属行业常见经验值，非实测结果。
+# 因此 estimate_credits 的输出必须标注为估算，不可当作精确值。
+ESTIMATE_WEIGHTS = {"uncached": 1.0, "cached": 0.1, "output": 3.0}
+
+
+def estimate_credits(tokens, total_credits):
+    """按假设单价把总积分分摊到三类 token。
+
+    这是估算：单价比例随模型变化，且未做校准。
+    """
+    if not tokens:
+        return None
+    weights = {
+        "uncached": tokens.get("uncached", 0) * ESTIMATE_WEIGHTS["uncached"],
+        "cached": tokens.get("cached", 0) * ESTIMATE_WEIGHTS["cached"],
+        "output": tokens.get("output", 0) * ESTIMATE_WEIGHTS["output"],
+    }
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return None
+    return {key: _round(total_credits * w / total_weight) for key, w in weights.items()}

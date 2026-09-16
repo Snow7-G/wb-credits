@@ -45,6 +45,8 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 /credits --all              全部会话排行
 /credits -k 关键词           按会话标题过滤
 /credits --detail           附加逐次请求明细
+/credits --tokens           附加 token 拆分
+/credits --tokens --estimate  再加三类 token 的积分估算
 ```
 
 也可以直接用自然语言问，比如"我这个月积分都花哪了"，技能会自动触发。
@@ -54,9 +56,34 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 ```bash
 python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --format text
 python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --all --format json
+python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --tokens --format text
 ```
 
 只依赖 Python 标准库，无需安装依赖。
+
+## token 拆分
+
+加 `--tokens` 后，卡片左下方会多出三行：
+
+```
+未缓存输入        160 万
+缓存命中        6212 万
+输出              25 万
+```
+
+数据来自 `~/.workbuddy/traces/` 里的 trace 文件。两点要注意：
+
+**没有「思考」token。** 客户端的 trace 里不记录 reasoning 类字段，这项拿不到，不是权限问题。
+
+**读取慢。** 文件名不含会话 ID，必须逐个读进来才能按会话聚合。实测 562 个文件 / 454 MB 要 **约 1 秒**，且随使用时间线性增长。所以默认关闭，只有主动加 `--tokens` 才扫。
+
+再加 `--estimate` 会多出一行按假设单价分摊的积分构成：
+
+```
+按比例估算        23 / 89 / 11 积分
+```
+
+**这一行是估算，不是实测。** 它按未缓存输入 1、缓存 0.1、输出 3 的经验比例把总积分分摊到三类。比例随模型变化且未做校准，别当精确值用。
 
 ## 运行测试
 
