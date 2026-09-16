@@ -154,7 +154,7 @@ It opens the database read-only (`file:...?mode=ro`) so a running client isn't d
 python3 tests/test_wb_credits.py
 ```
 
-228 checks covering the data layer, metrics, rendering, CLI, argument edge cases, and error paths. The count is verified by the suite itself — get it wrong and CI turns red.
+234 checks covering the data layer, metrics, rendering, CLI, argument edge cases, error paths, and Windows path escaping. The count is verified by the suite itself — get it wrong and CI turns red.
 
 **The tests are self-contained**: they run entirely on synthetic fixtures and never read or write your real data, so results are identical on any machine. CI runs them on Python 3.9 and 3.13 — the lower and upper bounds that were actually verified locally (3.14 passes too).
 

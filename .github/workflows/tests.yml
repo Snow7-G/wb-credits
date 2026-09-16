@@ -11,13 +11,21 @@ permissions:
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} · Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Windows runner 默认是 pwsh，不吃 heredoc；统一用 bash
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        # 上下界都是本地实跑过的（3.9.6 / 3.13.12 / 3.14.6 全绿），不是估的
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.9", "3.13"]
+        exclude:
+          # macOS 已由开发机每天实跑覆盖，CI 只留一档
+          - os: macos-latest
+            python-version: "3.9"
 
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +45,7 @@ jobs:
           ALLOWED = {
               "argparse", "datetime", "glob", "json", "os",
               "re", "sqlite3", "sys", "time", "unicodedata",
+              "urllib",
           }
 
           scripts = pathlib.Path("plugins/wb-credits/skills/wb-credits/scripts")

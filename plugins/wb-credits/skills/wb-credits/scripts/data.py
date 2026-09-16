@@ -15,6 +15,17 @@ import os
 import re
 import sqlite3
 import time
+from urllib.parse import quote
+
+
+def _db_uri(path):
+    """把数据库路径转成 SQLite 只读 URI。
+
+    Windows 路径含反斜杠，直接拼进 URI 会解析失败（SQLite 的 URI 里
+    分隔符只能是正斜杠）；用户名含空格、路径含 # 或 % 也会坏。
+    统一转正斜杠再做百分号编码，POSIX 路径不受影响。
+    """
+    return "file:" + quote(path.replace("\\", "/"), safe="/:") + "?mode=ro"
 
 DEFAULT_CONFIG_DIRS = (
     os.path.expanduser("~/.workbuddy"),
@@ -79,10 +90,15 @@ class Store(object):
     def _connect(self):
         if not os.path.isfile(self.db_path):
             raise DataError("找不到数据库文件：%s" % self.db_path)
-        uri = "file:%s?mode=ro" % self.db_path
         try:
-            con = sqlite3.connect(uri, uri=True)
+            con = sqlite3.connect(_db_uri(self.db_path), uri=True)
             con.execute("select 1 from sqlite_master limit 1")
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower():
+                raise DataError(
+                    "数据库正被 WorkBuddy 占用（可能正在写入），请稍后重试。"
+                )
+            raise DataError("打开数据库失败：%s" % exc)
         except sqlite3.Error as exc:
             raise DataError("打开数据库失败：%s" % exc)
         self._check_schema(con)

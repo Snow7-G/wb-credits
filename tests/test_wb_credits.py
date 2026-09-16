@@ -406,6 +406,47 @@ def test_data_errors():
         check("缺字段抛 DataError", True)
         check("缺字段错误点名了 model", "model" in str(exc), str(exc)[:80])
 
+
+def test_windows_paths():
+    print("\n[3.5] 数据层 · Windows 路径")
+
+    # Windows 路径直接拼进 SQLite URI 会解析失败：反斜杠不是 URI 分隔符，
+    # 用户名带空格、路径带 # 或 % 都会坏。修复方式是转正斜杠 + 百分号编码。
+    cases = [
+        (r"C:\Users\jiawen\.workbuddy\workbuddy.db",
+         "file:C:/Users/jiawen/.workbuddy/workbuddy.db?mode=ro"),
+        (r"C:\Users\John Doe\.workbuddy\workbuddy.db",
+         "file:C:/Users/John%20Doe/.workbuddy/workbuddy.db?mode=ro"),
+        (r"D:\wb #1%\db.db",
+         "file:D:/wb%20%231%25/db.db?mode=ro"),
+        ("/Users/jia/.workbuddy/workbuddy.db",
+         "file:/Users/jia/.workbuddy/workbuddy.db?mode=ro"),
+    ]
+    for raw, want in cases:
+        got = data._db_uri(raw)
+        check("URI 构造 %s" % raw[:30], got == want, "%r != %r" % (got, want))
+
+    check("POSIX 路径无转义残留",
+          "%" not in data._db_uri("/Users/jia/.workbuddy/workbuddy.db"))
+
+    # 修复不能破坏原行为：POSIX 真实连接仍走得通（test_data_normal 已覆盖，
+    # 这里再用一个含中文的路径验证编码无损）。
+    zh_dir = make_tmp()
+    zh_db = os.path.join(zh_dir, "目录", "workbuddy.db")
+    os.makedirs(os.path.dirname(zh_db))
+    con = sqlite3.connect(zh_db)
+    con.execute("create table t (x)")
+    con.commit()
+    con.close()
+    uri = data._db_uri(zh_db)
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        got = con.execute("select count(*) from t").fetchone()[0]
+        con.close()
+        check("中文路径经 URI 打开无损", got == 0, str(got))
+    except sqlite3.Error as exc:
+        check("中文路径经 URI 打开无损", False, str(exc))
+
     broken = make_store_dir(
         sessions=[("s1", "/tmp", "u", "坏数据会话", None, "Done", 0, 0, "m")],
         usages=[("s1", 100, 1000, 0, "{not json")],
@@ -1103,8 +1144,8 @@ def main():
     print("wb-credits 全量测试")
     print("=" * 60)
 
-    for test in (test_static, test_data_normal, test_data_errors, test_metrics,
-                 test_anomaly, test_render, test_cli, test_cli_errors,
+    for test in (test_static, test_data_normal, test_data_errors, test_windows_paths,
+                 test_metrics, test_anomaly, test_render, test_cli, test_cli_errors,
                  test_cross_check, test_robustness, test_cli_limits,
                  test_tokens, test_cli_tokens):
         try:
