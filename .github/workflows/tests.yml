@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Windows runner 的 stdout 默认 cp1252，脚本里的中文 print 会抛
+  # UnicodeEncodeError。在环境变量层强制，覆盖所有步骤。
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: "1"
+
 jobs:
   test:
     name: ${{ matrix.os }} · Python ${{ matrix.python-version }}

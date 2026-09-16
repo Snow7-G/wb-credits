@@ -26,6 +26,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(ROOT, "plugins", "wb-credits", "skills", "wb-credits", "scripts")
 sys.path.insert(0, SCRIPTS)
 
+# Windows 控制台默认 cp1252/GBK，直接 print 中文会抛 UnicodeEncodeError。
+# 测试输出大量中文，必须在任何 print 之前强制 UTF-8。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import data  # noqa: E402
 import metrics  # noqa: E402
 import render  # noqa: E402
