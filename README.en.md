@@ -23,13 +23,17 @@ The install path has been verified end-to-end in a **clean, isolated environment
 
 ## Install
 
-**WorkBuddy desktop** — three steps, no clone needed:
+**WorkBuddy desktop** — no clone, no command line:
 
-1. Open **Plugin Management** and click **Add Marketplace**
-2. Enter `Snow7-G/wb-credits` as the marketplace source and submit
-3. Find `wb-credits` in the list and install it
+1. Open **Skills** (it lives under the Experts area)
+2. Switch to the **Plugins** tab (套件)
+3. Click the **＋** button to the right of the marketplace tabs — its tooltip reads "Add Marketplace" (添加市场)
+4. Enter `Snow7-G/wb-credits` as the marketplace source and submit
+5. Find `wb-credits` in the list and install it
 
 Then **start a new conversation**.
+
+> Plugins are not under a menu called "Plugin Management" — they live under **Skills → Plugins**. That's easy to miss, which is why it's spelled out here.
 
 The source field accepts four forms:
 
