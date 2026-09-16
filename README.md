@@ -45,8 +45,8 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 /credits --all              全部会话排行
 /credits -k 关键词           按会话标题过滤
 /credits --detail           附加逐次请求明细
-/credits --tokens           附加 token 拆分
-/credits --tokens --estimate  再加三类 token 的积分估算
+/credits --estimate         附加三类 token 的积分估算
+/credits --no-tokens        跳过 token 明细，只读数据库
 ```
 
 也可以直接用自然语言问，比如"我这个月积分都花哪了"，技能会自动触发。
@@ -56,26 +56,30 @@ WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细�
 ```bash
 python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --format text
 python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --all --format json
-python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --tokens --format text
+python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --estimate --format text
 ```
 
 只依赖 Python 标准库，无需安装依赖。
 
 ## token 拆分
 
-加 `--tokens` 后，卡片左下方会多出三行：
+卡片左下方有三行，主数字下面那一行则是**缓存命中率**：
 
 ```
-未缓存输入        160 万
-缓存命中        6212 万
-输出              25 万
+积分｜37 轮｜缓存命中 97%｜上下文 16 万
+
+未缓存输入        214 万
+缓存命中        7854 万
+输出              28 万
 ```
+
+命中率单独提到上面，是因为它比三个绝对量更有解释力：命中率高说明钱主要花在**每轮重复发送的上下文**上，而不是输出。想压成本就该减上下文，不是让模型少说话。
 
 数据来自 `~/.workbuddy/traces/` 里的 trace 文件。两点要注意：
 
 **没有「思考」token。** 客户端的 trace 里不记录 reasoning 类字段，这项拿不到，不是权限问题。
 
-**读取慢。** 文件名不含会话 ID，必须逐个读进来才能按会话聚合。实测 562 个文件 / 454 MB 要 **约 1 秒**，且随使用时间线性增长。所以默认关闭，只有主动加 `--tokens` 才扫。
+**默认就查，代价可忽略。** 需要的 `sessionId` 与 `modelInfo` 都固定在文件开头 400 字节内，所以只读头部即可——实测 571 个文件 / 462 MB 是 **约 42 毫秒**（早期逐文件全量解析要 1 秒）。头部读不到字段时会读全文再判一次，不会静默漏数据。想更快可以加 `--no-tokens`，降到约 30 毫秒。
 
 再加 `--estimate` 会多出一行按假设单价分摊的积分构成：
 

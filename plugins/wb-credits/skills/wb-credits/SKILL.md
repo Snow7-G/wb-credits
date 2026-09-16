@@ -19,15 +19,15 @@ python3 scripts/wb_credits.py --all --format text    # 全部会话排行
 python3 scripts/wb_credits.py -k 关键词               # 按标题过滤，配合 --all
 python3 scripts/wb_credits.py --detail               # 附加逐次明细
 python3 scripts/wb_credits.py --session <会话ID>      # 指定会话
-python3 scripts/wb_credits.py --tokens               # 附加 token 拆分（扫描 traces，约 1 秒）
-python3 scripts/wb_credits.py --tokens --estimate    # 再加三类 token 的积分估算
+python3 scripts/wb_credits.py --no-tokens            # 不查 token，只读数据库，更快
+python3 scripts/wb_credits.py --estimate             # 附加三类 token 的积分估算
 ```
 
 三种输出格式：`json`（含数据与卡片 HTML）、`text`（等宽纯文本）、`card`（仅 HTML）。
 
 若插件根目录环境变量不可用，用 Glob 搜索 `wb_credits.py` 定位后以绝对路径执行。
 
-## token 拆分（--tokens）
+## token 拆分
 
 数据源是 `<配置目录>/traces/<pid>/trace_*.json`，其中的 `modelInfo` 有 `totalInputTokens` / `totalCachedTokens` / `totalOutputTokens`。
 
@@ -35,7 +35,7 @@ python3 scripts/wb_credits.py --tokens --estimate    # 再加三类 token 的积
 
 **没有「思考」token。** trace 的全部字段里不存在 reason / think / thought 相关项。用户若要求"思考用了多少"，如实说明拿不到，不要编。
 
-**读取很慢。** 文件名不含会话 ID，必须逐个读进来才能按会话聚合。实测 562 个文件 / 454 MB 要 **约 1 秒**，且随使用时间线性增长。所以默认关闭，只有用户明确要看 token 时才加 `--tokens`。
+**默认开启，代价可忽略。** 只需要 sessionId 与 modelInfo，两者都固定在文件开头 400 字节内，因此只读头部就够——实测 571 个文件 / 462 MB 是 **约 42 毫秒**（早期逐文件全量解析要 1 秒）。头部拿不到字段时会读全文再判一次，不会静默漏数据。
 
 拆分展示三项：
 
@@ -44,6 +44,8 @@ python3 scripts/wb_credits.py --tokens --estimate    # 再加三类 token 的积
 | 未缓存输入 | `input - cached`，按全价计费的部分 |
 | 缓存命中 | `cached`，按折扣价计费 |
 | 输出 | `output` |
+
+**缓存命中率单独放在主数字下面那一行**，不埋在明细里。它解释的是"为什么花了这么多"——命中率高说明钱主要花在重复发送的上下文上，而不是输出。这是整张卡片里最有解释力的一项。
 
 **`--estimate` 的结果是估算，不是实测。** 它按假设的单价比例（未缓存输入 1、缓存 0.1、输出 3）把总积分分摊到三类。比例是行业经验值，随模型变化，未做校准。对外说明时必须标注"估算"，不能说成实测值。
 
@@ -78,7 +80,7 @@ JSON 里的 `card` 字段是卡片 HTML。**必须调用可视化渲染工具渲
 
 **4. 积分是流式累加的**，不是请求结束后一次性写入。正在进行的那一轮只能看到部分值，因此要标注"未定稿"。同一个会话隔几十秒查两次，数字会变，这是正常的。
 
-**5. `used` / `size` 是上下文 token 占用**，不是积分。`used` 的确切含义（当前值还是峰值）没有权威说明，对外只能说"上下文占用"，不要做进一步推断。
+**5. `used` / `size` 是上下文 token 占用**，不是积分。`used` 的确切含义（当前值还是峰值）没有权威说明，对外只能说"上下文占用"，不要做进一步推断。另外它是**会回落的**——上下文压缩后实测从 39 万掉到 11 万，所以它只是当前快照，不能读成"这个对话累计处理了多少"；要表达累计量级应该用 token 明细里的输入总量。
 
 **6. 单轮成本不单调递减。** 受两个变量支配：前缀缓存是否命中、这一轮任务有多重。长时间闲置后首轮会明显变贵——实测空闲两小时十九分后那轮是前一轮的 9 倍。所以：
 

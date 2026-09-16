@@ -156,6 +156,13 @@ def fmt_tokens(count):
     return "%d" % count
 
 
+def fmt_ratio(value):
+    """比例展示。拿不到时给破折号，不拿 0% 冒充。"""
+    if value is None:
+        return "—"
+    return "%.0f%%" % (value * 100.0)
+
+
 def token_summary(raw):
     """整理单会话的 token 用量。raw 来自 data.Store.trace_tokens()。"""
     if not raw:
@@ -168,7 +175,8 @@ def token_summary(raw):
         "uncached": raw.get("uncached", 0),
         "output": raw.get("output", 0),
         "traces": raw.get("traces", 0),
-        "cached_ratio": (cached / float(total_in)) if total_in else 0.0,
+        # 没有输入量时不给 0，避免把「无数据」显示成「完全没命中」。
+        "cached_ratio": (cached / float(total_in)) if total_in else None,
     }
 
 

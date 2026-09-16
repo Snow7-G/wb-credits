@@ -43,13 +43,21 @@ def build_parser():
     parser.add_argument("--detail", action="store_true", help="展开逐次请求明细")
     parser.add_argument(
         "--tokens",
+        dest="tokens",
         action="store_true",
-        help="附加 token 拆分（未缓存输入/缓存命中/输出）。需扫描 traces 目录，约 1 秒",
+        default=True,
+        help="包含 token 拆分（未缓存输入/缓存命中/输出），默认开启",
+    )
+    parser.add_argument(
+        "--no-tokens",
+        dest="tokens",
+        action="store_false",
+        help="跳过 token 拆分，只查数据库，更快",
     )
     parser.add_argument(
         "--estimate",
         action="store_true",
-        help="按假设单价估算三类 token 的积分构成，需与 --tokens 同用。结果为估算值",
+        help="按假设单价估算三类 token 的积分构成。结果为估算值，不是实测",
     )
     parser.add_argument("--limit", type=int, default=15, help="排行显示条数")
     parser.add_argument(

@@ -598,7 +598,13 @@ def test_tokens():
     check("token_summary 保留各项", ts["input"] == 1000 and ts["output"] == 50)
     check("缓存比例计算正确", abs(ts["cached_ratio"] - 0.9) < 1e-9)
     check("空输入返回 None", metrics.token_summary(None) is None)
-    check("input 为 0 时比例不除零", metrics.token_summary({"input": 0})["cached_ratio"] == 0.0)
+    check("input 为 0 时比例给 None 而非 0",
+          metrics.token_summary({"input": 0})["cached_ratio"] is None)
+
+    check("比例格式化为百分比", metrics.fmt_ratio(0.974) == "97%")
+    check("零比例显示 0%", metrics.fmt_ratio(0.0) == "0%")
+    check("全命中显示 100%", metrics.fmt_ratio(1.0) == "100%")
+    check("比例为 None 时给破折号", metrics.fmt_ratio(None) == "—")
 
     est = metrics.estimate_credits(ts, 100.0)
     check("估算三项之和等于总积分", abs(sum(est.values()) - 100.0) < 0.01, str(est))
@@ -656,6 +662,49 @@ def test_tokens():
     check("截断后 uncached 不为负", agg["s1"]["uncached"] == 0)
     store.close()
 
+    # 头部读取只对「字段位置稳定」成立。以下三种情况必须仍然正确。
+    tmp4 = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    d4 = os.path.join(tmp4, "traces", "1")
+    os.makedirs(d4, exist_ok=True)
+
+    # (a) 字段被挤到 64KB 之后：必须靠读全文兜住，不能静默漏掉
+    deep = {"trace": {"metadata": {"blob": "x" * 80000},
+                      "sessionId": "s1",
+                      "modelInfo": {"totalInputTokens": 700,
+                                    "totalCachedTokens": 600,
+                                    "totalOutputTokens": 10}}}
+    with open(os.path.join(d4, "trace_deep.json"), "w", encoding="utf-8") as handle:
+        json.dump(deep, handle)
+
+    # (b) token 字段只出现在 spans 里：不能算进 modelInfo 的账
+    span_only = {"trace": {"sessionId": "s1", "modelInfo": {"models": ["m"]},
+                           "spans": [{"name": "llm_call",
+                                      "totalInputTokens": 999999,
+                                      "totalCachedTokens": 999999,
+                                      "totalOutputTokens": 999999}]}}
+    with open(os.path.join(d4, "trace_span.json"), "w", encoding="utf-8") as handle:
+        json.dump(span_only, handle)
+
+    # (c) 字段顺序调换：靠正则逐字段取，不应依赖先后
+    reordered = {"trace": {"modelInfo": {"totalOutputTokens": 7,
+                                         "totalCachedTokens": 20,
+                                         "totalInputTokens": 100},
+                           "sessionId": "s1"}}
+    with open(os.path.join(d4, "trace_reorder.json"), "w", encoding="utf-8") as handle:
+        json.dump(reordered, handle)
+
+    store = data.Store(config_dir=tmp4)
+    agg = store.trace_tokens()
+    store.close()
+    got = agg.get("s1", {})
+    check("字段越过头部时仍能读到", got.get("input") == 800, str(got))
+    check("越过头部时未漏文件", got.get("traces") == 3, str(got.get("traces")))
+    check("spans 里的同名字段不被计入", got.get("input") != 1000799, str(got))
+    check("字段顺序调换不影响结果", got.get("output") == 17, str(got))
+
     tmp3 = make_store_dir(
         sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
         usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
@@ -684,7 +733,12 @@ def test_cli_tokens():
     print("\n[13] 命令行 · token 开关")
 
     payload = json.loads(run_cli(["--format", "json"]).stdout)
-    check("默认不返回 tokens 字段", "tokens" not in payload["summary"])
+    check("默认返回 tokens 字段", "tokens" in payload["summary"])
+    check("默认的 tokens 含缓存比例",
+          (payload["summary"].get("tokens") or {}).get("cached_ratio") is not None)
+
+    off = json.loads(run_cli(["--format", "json", "--no-tokens"]).stdout)
+    check("--no-tokens 时不返回 tokens 字段", "tokens" not in off["summary"])
 
     result = run_cli(["--format", "json", "--tokens"])
     check("--tokens 执行成功", result.returncode == 0, result.stderr[:100])
@@ -712,10 +766,21 @@ def test_cli_tokens():
           "未缓存输入" in run_cli(["--format", "card", "--tokens"]).stdout)
 
     payload = json.loads(run_cli(["--format", "json", "--estimate"]).stdout)
-    check("只给 --estimate 时不产出", "tokens" not in payload["summary"])
+    check("--estimate 单独用时也产出估算",
+          "estimate" in (payload["summary"].get("tokens") or {}))
 
     result = run_cli(["--all", "--format", "json", "--tokens"])
     check("--all 与 --tokens 同用不报错", result.returncode == 0, result.stderr[:100])
+
+    # 缓存命中率要出现在主数字下方那一行，而不是埋在 token 明细里
+    card = run_cli(["--format", "card"]).stdout
+    meta = run_cli(["--format", "text"]).stdout
+    check("卡片顶部含缓存命中率", "缓存命中 " in card and "%" in card)
+    check("纯文本顶部含缓存命中率", "缓存命中 " in meta and "%" in meta)
+    check("卡片顶部行在 token 明细之前",
+          card.find("上下文") < card.find("未缓存输入"), "顶部行未前置")
+    check("关掉 token 后顶部行不再出现比例",
+          "缓存命中 " not in run_cli(["--format", "card", "--no-tokens"]).stdout)
 
 
 # --------------------------------------------------------------------------
