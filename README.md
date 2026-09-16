@@ -6,7 +6,7 @@
 
 按**会话**查看 WorkBuddy 的积分消耗。
 
-官方的「套餐与用量」页只有总量和逐条请求明细，回答不了"这个对话到底花了多少"。这个插件读本机数据，把一个会话下所有请求的积分加总，补上这块空白。
+官方的用量页只有总量和逐条请求明细，回答不了"这个对话到底花了多少"。这个插件读本机数据，把一个会话下所有请求的积分加总，补上这块空白。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/card-dark.svg">
@@ -56,7 +56,7 @@
 
 本地开发时把第一行换成 `./path/to/wb-credits`。
 
-**怎么确认装上了**：让我调用一次技能名 `wb-credits`。返回 `Can not find skill` 就是没加载，新开对话再试。
+**怎么确认装上了**：让 AI 调用一次技能名 `wb-credits`。返回 `Can not find skill` 就是没加载，新开对话再试。
 
 ## 用法
 
