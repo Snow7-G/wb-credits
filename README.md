@@ -1,5 +1,7 @@
 # wb-credits
 
+[![tests](https://github.com/Snow7-G/wb-credits/actions/workflows/tests.yml/badge.svg)](https://github.com/Snow7-G/wb-credits/actions/workflows/tests.yml)
+
 按**会话**查看 WorkBuddy 的积分消耗。
 
 WorkBuddy 官网的「套餐与用量」只能看到总量和逐条请求明细，没有"这个对话一共花了多少"这个视图。这个插件读本机数据，把每个会话下所有请求的积分加总，补上这块空白。
@@ -101,7 +103,9 @@ python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --estimate --
 python3 tests/test_wb_credits.py
 ```
 
-真实数据只读；边界场景用临时构造的数据库，不触碰你的数据。
+208 项检查，覆盖数据层、计算层、呈现层、命令行、参数边界与错误路径。
+
+**测试是自包含的**：全部跑在临时构造的假数据上，不读也不写你的真实数据。所以在任何机器上结果都一样，CI 里也能跑。CI 在 Python 3.9 与 3.13 上各跑一遍——这两个版本是本地实跑验证过的上下界（3.14 也通过）。
 
 ## 数据从哪来
 

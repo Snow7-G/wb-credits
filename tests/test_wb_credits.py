@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """wb-credits 全量测试。
 
-真实数据只读；边界场景用临时构造的数据库，不触碰用户数据。
+自包含：全部跑在临时构造的假数据上，不读也不写用户的真实数据。
+因此在任何机器上结果都一样，CI 里也能直接跑。
 
 直接运行：
     python3 tests/test_wb_credits.py
@@ -97,11 +98,97 @@ def make_store_dir(sessions=None, usages=None, sessions_ddl=SESSIONS_DDL,
     return tmp
 
 
-def run_cli(args, config_dir=None, drop_env=()):
+# --------------------------------------------------------------------------
+# 共享固定装置
+#
+# 整套测试必须能在没有开发机真实数据的环境里跑起来（CI、别人的电脑）。
+# 因此造一份内容确定的假数据，默认所有命令行走它。真实数据一次都不碰。
+# --------------------------------------------------------------------------
+
+FIXTURE_SESSION = "fixture-session-0001"
+
+_FIXTURE_SESSIONS = [
+    ("fixture-session-0001", "/tmp/fixture-alpha", "u", "固定装置会话甲", None,
+     "Done", 1700000000000, 1700000003000, "glm-5.3-flash"),
+    ("fixture-session-0002", "/tmp/fixture-beta", "u", "固定装置会话乙", None,
+     "Done", 1700000001000, 1700000004000, "glm-5.3-flash"),
+    ("fixture-session-0003", "/tmp/fixture-gamma", "u", "含关键词的会话", None,
+     "Done", 1700000002000, 1700000005000, "glm-5.3-flash"),
+]
+
+_FIXTURE_USAGES = [
+    ("fixture-session-0001", 12000, 1000000, 1700000003000,
+     '{"r1": 1.5, "r2": 2.25, "r3": 0.75, "r4": 12.0}'),
+    ("fixture-session-0002", 8000, 1000000, 1700000004000,
+     '{"r5": 4.0, "r6": 0.5}'),
+    ("fixture-session-0003", 600, 1000000, 1700000005000, '{"r7": 8.0}'),
+]
+
+# r3 到 r4 之间留一段长空闲，让异常识别有东西可抓
+_FIXTURE_STAMPS = [
+    ("r1", 1700000000000),
+    ("r2", 1700000000000 + 60 * 1000),
+    ("r3", 1700000000000 + 120 * 1000),
+    ("r4", 1700000000000 + 120 * 1000 + 95 * 60 * 1000),
+]
+
+_FIXTURE_TOKENS = {"input": 400000, "cached": 360000, "output": 9000}
+
+_fixture = None
+
+
+def fixture_dir():
+    """造固定装置，只建一次，返回其配置目录。"""
+    global _fixture
+    if _fixture is not None:
+        return _fixture
+
+    root = make_tmp()
+    con = sqlite3.connect(os.path.join(root, "workbuddy.db"))
+    con.execute(SESSIONS_DDL)
+    con.execute(USAGE_DDL)
+    for row in _FIXTURE_SESSIONS:
+        con.execute("insert into sessions values (?,?,?,?,?,?,?,?,?)", row)
+    for row in _FIXTURE_USAGES:
+        con.execute("insert into session_usage values (?,?,?,?,?)", row)
+    con.commit()
+    con.close()
+
+    log_dir = os.path.join(root, "audit-log")
+    os.makedirs(log_dir)
+    with open(os.path.join(log_dir, "2026-01-01.jsonl"), "w", encoding="utf-8") as handle:
+        for rid, ts in _FIXTURE_STAMPS:
+            handle.write(json.dumps({"requestId": rid, "timestamp": ts}) + "\n")
+
+    trace_dir = os.path.join(root, "traces", "1")
+    os.makedirs(trace_dir)
+    with open(os.path.join(trace_dir, "trace_fixture.json"), "w", encoding="utf-8") as handle:
+        json.dump({"trace": {
+            "sessionId": FIXTURE_SESSION,
+            "modelInfo": {
+                "totalInputTokens": _FIXTURE_TOKENS["input"],
+                "totalCachedTokens": _FIXTURE_TOKENS["cached"],
+                "totalOutputTokens": _FIXTURE_TOKENS["output"],
+            },
+        }}, handle)
+
+    _fixture = root
+    return root
+
+
+def run_cli(args, config_dir=None, drop_env=(), session=FIXTURE_SESSION):
+    """跑一次命令行。
+
+    默认指向固定装置，而不是开发机的真实数据——否则这套测试换个环境就红。
+    """
     env = dict(os.environ)
-    if config_dir:
-        env["WORKBUDDY_CONFIG_DIR"] = config_dir
-        env.pop("CODEBUDDY_CONFIG_DIR", None)
+    env["WORKBUDDY_CONFIG_DIR"] = config_dir or fixture_dir()
+    env.pop("CODEBUDDY_CONFIG_DIR", None)
+    # 清掉开发机上的会话变量，再按需注入，避免继承真实会话
+    env.pop("CODEBUDDY_SESSION_ID", None)
+    env.pop("CODEBUDDY_CONVERSATION_REQUEST_ID", None)
+    if session:
+        env["CODEBUDDY_SESSION_ID"] = session
     for key in drop_env:
         env.pop(key, None)
     return subprocess.run(
@@ -188,7 +275,7 @@ def test_static():
 def test_data_normal():
     print("\n[2] 数据层 · 正常路径")
 
-    store = data.Store()
+    store = data.Store(config_dir=fixture_dir())
     try:
         sessions = store.sessions()
         check("能读到会话表", isinstance(sessions, dict) and len(sessions) > 0,
@@ -499,8 +586,11 @@ def test_cli():
           all(payload["rows"][i]["total"] >= payload["rows"][i + 1]["total"]
               for i in range(len(payload["rows"]) - 1)))
 
-    result = run_cli(["--all", "--format", "text", "--limit", "3"])
-    check("排行文本输出成功", result.returncode == 0 and "共" in result.stdout)
+    # 固定装置有 3 个会话。取 2 条才会出现「共 N 个」那行，顺带把截断提示也覆盖上。
+    result = run_cli(["--all", "--format", "text", "--limit", "2"])
+    check("排行文本输出成功", result.returncode == 0 and "共" in result.stdout,
+          result.stdout[:80])
+    check("排行被截断时说明总数", "共 3 个会话" in result.stdout, result.stdout[:80])
 
     result = run_cli(["--all", "-k", "不存在的关键词zzz", "--format", "json"])
     payload = json.loads(result.stdout)
@@ -558,11 +648,8 @@ def test_cli_errors():
 def test_cross_check():
     print("\n[9] 端到端一致性")
 
-    store = data.Store()
-    session_id = data.current_session_id()
-    if not session_id:
-        usages = store.all_usage()
-        session_id = max(usages, key=lambda u: sum(u["credits"].values()))["session_id"]
+    store = data.Store(config_dir=fixture_dir())
+    session_id = FIXTURE_SESSION
 
     usage = store.usage(session_id)
     expected = round(sum(usage["credits"].values()), 2)

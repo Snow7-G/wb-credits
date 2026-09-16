@@ -1,0 +1,64 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 上下界都是本地实跑过的（3.9.6 / 3.13.12 / 3.14.6 全绿），不是估的
+        python-version: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 确认只依赖标准库
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+
+          # 不用 sys.stdlib_module_names —— 那是 3.10+ 才有的，
+          # 在 3.9 上取不到会把所有标准库都误判成第三方。
+          # 改成显式允许清单：多一个新依赖就必须有人来改这里，正好是要的效果。
+          ALLOWED = {
+              "argparse", "datetime", "glob", "json", "os",
+              "re", "sqlite3", "sys", "time", "unicodedata",
+          }
+
+          scripts = pathlib.Path("plugins/wb-credits/skills/wb-credits/scripts")
+          local = {p.stem for p in scripts.glob("*.py")}
+          found = set()
+          for path in scripts.glob("*.py"):
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      found.update(a.name.split(".")[0] for a in node.names)
+                  elif isinstance(node, ast.ImportFrom) and node.module:
+                      found.add(node.module.split(".")[0])
+
+          unexpected = sorted(
+              m for m in found
+              if m not in ALLOWED and m not in local and m != "__future__"
+          )
+          if unexpected:
+              sys.exit("出现未登记的依赖：%s（若是标准库，请加进 ALLOWED）" % unexpected)
+          print("导入的模块：%s" % ", ".join(sorted(found)))
+          print("无第三方依赖")
+          PY
+
+      - name: 运行全量测试
+        run: python tests/test_wb_credits.py
