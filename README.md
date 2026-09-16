@@ -17,9 +17,26 @@
 
 **验证环境**：WorkBuddy 桌面端 5.3.14（macOS）。数据来自客户端内部存储而非公开 API，不保证其他版本一致——如果读不出来会明确报错，不会给你一个错数字。
 
+安装路径已在**隔离的干净环境**里端到端验证过：从 GitHub 添加市场 → 安装插件 → 从安装位置跑通脚本，装到的版本与仓库最新提交一致。
+
 ## 安装
 
-**WorkBuddy 桌面端**：在插件管理页把本仓库目录添加为本地市场，安装 `wb-credits`，然后**新开一个对话**。
+**WorkBuddy 桌面端**（三步，不用克隆）：
+
+1. 打开**插件管理**，点**添加市场**
+2. 「市场源」填 `Snow7-G/wb-credits`，提交
+3. 在列表里找到 `wb-credits`，安装
+
+然后**新开一个对话**。
+
+「市场源」这一栏支持四种写法，按需选：
+
+| 写法 | 场景 |
+|---|---|
+| `owner/repo` | GitHub 仓库，最常用 |
+| `git@github.com:owner/repo.git` | SSH |
+| `./path/to/marketplace` | 本地目录，改完代码立即生效，适合开发 |
+| `https://.../marketplace.zip` | ZIP 包 |
 
 桌面端不实现 `/plugin` 系列斜杠命令，敲在聊天框里只会被当作普通消息。`/reload-plugins` 同理。插件配置只在会话启动时读取，所以装完必须新开对话或重启才会加载。
 
@@ -31,7 +48,7 @@
 /reload-plugins
 ```
 
-本地开发时把第一行换成本地路径：`/plugin marketplace add /path/to/wb-credits`
+本地开发时把第一行换成 `./path/to/wb-credits`。
 
 **怎么确认装上了**：让我调用一次技能名 `wb-credits`。返回 `Can not find skill` 就是没加载，新开对话再试。
 

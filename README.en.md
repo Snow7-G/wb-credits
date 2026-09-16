@@ -17,11 +17,28 @@ The card follows your theme, so the image above switches with your system's ligh
 
 **Tested on** WorkBuddy desktop 5.3.14 (macOS). The data comes from the client's internal storage, not a public API, so other versions aren't guaranteed to work. If it can't read the data it says so explicitly rather than returning a wrong number.
 
+The install path has been verified end-to-end in a **clean, isolated environment**: add the marketplace from GitHub → install the plugin → run the script from where it landed. The commit it pulled matched the latest one in the repository.
+
 > The card text is in Chinese, because WorkBuddy is a Chinese product and so is its user base. The plugin itself has no other locale.
 
 ## Install
 
-**WorkBuddy desktop**: add this repository as a local marketplace in the plugin management page, install `wb-credits`, then **start a new conversation**.
+**WorkBuddy desktop** — three steps, no clone needed:
+
+1. Open **Plugin Management** and click **Add Marketplace**
+2. Enter `Snow7-G/wb-credits` as the marketplace source and submit
+3. Find `wb-credits` in the list and install it
+
+Then **start a new conversation**.
+
+The source field accepts four forms:
+
+| Form | When to use |
+|---|---|
+| `owner/repo` | A GitHub repository — the usual case |
+| `git@github.com:owner/repo.git` | SSH |
+| `./path/to/marketplace` | A local directory; edits take effect immediately, handy for development |
+| `https://.../marketplace.zip` | A ZIP archive |
 
 The desktop app does not implement the `/plugin` slash commands — typing them into the chat box just sends them as a normal message. Same for `/reload-plugins`. Plugin config is only read at session startup, so you must open a new conversation or restart for it to load.
 
@@ -33,7 +50,7 @@ The desktop app does not implement the `/plugin` slash commands — typing them 
 /reload-plugins
 ```
 
-For local development, point the first line at your working copy instead: `/plugin marketplace add /path/to/wb-credits`
+For local development, point the first line at your working copy instead: `./path/to/wb-credits`
 
 **How to tell it loaded**: ask the agent to invoke the `wb-credits` skill. If you get `Can not find skill`, it isn't loaded — open a new conversation and try again.
 
