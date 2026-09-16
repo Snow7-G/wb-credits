@@ -325,7 +325,18 @@ def test_metrics():
 
     summary = metrics.summarize({})
     check("空数据不崩", summary["total"] == 0.0 and summary["rounds"] == 0)
-    check("空数据边际成本为 0", summary["marginal"] == 0.0)
+    check("空数据边际成本为 None", summary["marginal"] is None)
+    check("空数据预估为 None", summary["forecast"]["credits"] is None)
+
+    only_in_flight = metrics.summarize({"r1": 0.95}, current_request_id="r1")
+    check("仅当前轮时边际成本为 None", only_in_flight["marginal"] is None)
+    check("仅当前轮时预估为 None", only_in_flight["forecast"]["credits"] is None)
+    check("仅当前轮时预估基数为 0", only_in_flight["forecast"]["basis"] == 0)
+
+    mixed = metrics.summarize(
+        {"r1": 1.0, "r2": 2.0, "r3": 3.0, "r4": 0.5}, current_request_id="r4"
+    )
+    check("预估基数为已结算轮数", mixed["forecast"]["basis"] == 3, str(mixed["forecast"]))
     check("空数据异常提示为空", summary["anomaly"] is None)
 
     check("时间格式化为 HH:MM", metrics.fmt_clock(1789540180559).count(":") == 1)
@@ -411,6 +422,17 @@ def test_render():
 
     empty = render.text(metrics.summarize({}))
     check("空数据纯文本不崩", "0.00" in empty)
+
+    thin = metrics.summarize({"r1": 0.95}, used=40000, current_request_id="r1")
+    thin_card = render.card(thin)
+    check("数据不足时卡片不出现「约 0 积分」", "约 0 积分" not in thin_card)
+    check("数据不足时卡片说明待结算", "待首轮结算" in thin_card)
+    check("数据不足时卡片仍显示累计值", "0.95" in thin_card)
+    check("数据不足时不报 in_flight 数值错乱", "0.95 未定稿" in thin_card)
+
+    thin_text = render.text(thin)
+    check("数据不足时纯文本不出现「约 0 积分」", "约 0 积分" not in thin_text)
+    check("数据不足时纯文本说明待结算", "待首轮结算" in thin_text)
 
     check("排行空列表给人话", "没有找到" in render.rank_text([]))
     check("明细空列表给人话", "没有用量记录" in render.detail_text([]))

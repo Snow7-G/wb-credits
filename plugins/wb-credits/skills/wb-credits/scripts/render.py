@@ -32,7 +32,7 @@ FOOTER_TEMPLATE = """  <div style="font-size:12px;color:var(--color-text-tertiar
 def card(summary):
     """本对话卡片。HTML 片段，供渲染工具使用。"""
     forecast = summary["forecast"]
-    label = "再聊 %d 轮｜约 %.0f 积分" % (forecast["rounds"], forecast["credits"])
+    label = _forecast_label(forecast)
     if summary.get("in_flight"):
         label += "（本轮 %.2f 未定稿）" % summary["in_flight_value"]
 
@@ -50,6 +50,13 @@ def card(summary):
     )
 
 
+def _forecast_label(forecast):
+    """预估文案。数据不足时说明原因，不给 0 这类错数字。"""
+    if forecast.get("credits") is None:
+        return "再聊 %d 轮｜待首轮结算" % forecast["rounds"]
+    return "再聊 %d 轮｜约 %.0f 积分" % (forecast["rounds"], forecast["credits"])
+
+
 def text(summary):
     """纯文本降级版。渲染工具不可用时使用，字段与卡片一致。"""
     left = [
@@ -61,7 +68,7 @@ def text(summary):
     right = [
         "最近三轮",
         _join(summary["recent"]),
-        "再聊 %d 轮｜约 %.0f 积分" % (forecast["rounds"], forecast["credits"]),
+        _forecast_label(forecast),
     ]
 
     column = 34

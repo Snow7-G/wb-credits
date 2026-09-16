@@ -33,6 +33,8 @@ JSON 里的 `card` 字段是卡片 HTML。**必须调用可视化渲染工具渲
 
 渲染完成后用一两句话说明数字含义。`summary.anomaly` 有值时才解释原因，没有就不要再补充。
 
+`summary.forecast.credits` 为 `null` 时表示已结算轮次不足（`summary.forecast.basis` 为 0），此时**不要编造预估值**，如实说明首轮尚未结算即可。卡片模板会自动显示"待首轮结算"。
+
 ## 数据源
 
 `~/.workbuddy/workbuddy.db`，SQLite，WAL 模式。

@@ -37,7 +37,9 @@ def summarize(credits, used=0, size=0, timestamps=None, current_request_id=""):
 
     settled = [value for rid, value in items if rid != current_request_id]
     recent = settled[-RECENT_WINDOW:]
-    marginal = sum(recent) / len(recent) if recent else 0.0
+    # 已结算轮次为空时不给边际成本。返回 0 会让下游渲染出"约 0 积分"这种错数字，
+    # 宁可标记为数据不足，让呈现层说明原因。
+    marginal = _round(sum(recent) / len(recent)) if recent else None
 
     in_flight = bool(current_request_id) and current_request_id in credits
 
@@ -47,10 +49,11 @@ def summarize(credits, used=0, size=0, timestamps=None, current_request_id=""):
         "used": used,
         "size": size,
         "recent": [_round(value) for value in values[-RECENT_WINDOW:]],
-        "marginal": _round(marginal),
+        "marginal": marginal,
         "forecast": {
             "rounds": FORECAST_ROUNDS,
-            "credits": _round(marginal * FORECAST_ROUNDS),
+            "credits": _round(marginal * FORECAST_ROUNDS) if marginal is not None else None,
+            "basis": len(recent),
         },
         "in_flight": in_flight,
         "in_flight_value": _round(credits.get(current_request_id, 0.0)) if in_flight else 0.0,
