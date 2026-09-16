@@ -31,6 +31,8 @@ The install path has been verified end-to-end in a **clean, isolated environment
 4. Enter `Snow7-G/wb-credits` as the marketplace source and submit
 5. Find the `wb-credits` card and click the **＋** on its right to install
 
+> After installing, seeing "**此市场暂无套件**" (no plugins in this marketplace) on the marketplace tab is normal — that tab only lists *uninstalled* plugins. Installed ones live under the "Installed" (已安装) tab.
+
 Then **start a new conversation**.
 
 > Plugins are not under a menu called "Plugin Management" — they live under **Skills → Plugins**. That's easy to miss, which is why it's spelled out here.
