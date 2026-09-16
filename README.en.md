@@ -25,17 +25,19 @@ The install path has been verified end-to-end in a **clean, isolated environment
 
 **WorkBuddy desktop** — no clone, no command line:
 
-1. Open **Skills** (it lives under the Experts area)
-2. Switch to the **Plugins** tab (套件)
-3. Click the **＋** button to the right of the marketplace tabs — its tooltip reads "Add Marketplace" (添加市场)
-4. Enter `Snow7-G/wb-credits` as the marketplace source and submit
-5. Find the `wb-credits` card and click the **＋** on its right to install
+**[Open the Skills page in WorkBuddy →](workbuddy://skills)**
 
+Clicking the link above pops up "Open WorkBuddy?" — confirm and the app lands directly on the Skills page, saving you the sidebar hunt. Then switch to the **Plugins** tab (套件):
+
+1. Click the **＋** button to the right of the marketplace tabs — its tooltip reads "Add Marketplace" (添加市场)
+2. Enter `Snow7-G/wb-credits` as the marketplace source and submit
+3. Find the `wb-credits` card and click the **＋** on its right to install
+
+> **Link does nothing?** Do it manually: open **Skills** from the sidebar (it lives under the Experts area) and switch to the **Plugins** tab (套件). Plugins are not under a menu called "Plugin Management" — that name is easy to miss.
+>
 > After installing, seeing "**此市场暂无套件**" (no plugins in this marketplace) on the marketplace tab is normal — that tab only lists *uninstalled* plugins. Installed ones live under the "Installed" (已安装) tab.
 
 Then **start a new conversation**.
-
-> Plugins are not under a menu called "Plugin Management" — they live under **Skills → Plugins**. That's easy to miss, which is why it's spelled out here.
 
 The source field accepts four forms:
 
