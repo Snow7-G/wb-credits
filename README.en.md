@@ -36,7 +36,7 @@ The install path has been verified end-to-end in a **clean, isolated environment
 >
 > After installing, seeing "**此市场暂无套件**" (no plugins in this marketplace) on the marketplace tab is normal — that tab only lists *uninstalled* plugins. Installed ones live under the "Installed" (已安装) tab.
 
-Then **start a new conversation**.
+Then **restart WorkBuddy**. Try a new conversation first; if wb-credits doesn't show up in the skills list or the `/` picker, restart the whole app — the plugin cache lives in the client's process, and a new conversation doesn't necessarily get a new process. Verified on a real Windows machine.
 
 The source field accepts four forms:
 
@@ -59,7 +59,7 @@ The desktop app does not implement the `/plugin` slash commands — typing them 
 
 For local development, point the first line at your working copy instead: `./path/to/wb-credits`
 
-**How to tell it loaded**: ask the agent to invoke the `wb-credits` skill. If you get `Can not find skill`, it isn't loaded — open a new conversation and try again.
+**How to tell it loaded**: ask the agent to invoke the `wb-credits` skill. If you get `Can not find skill`, it isn't loaded — restart WorkBuddy and try again.
 
 ## Usage
 
