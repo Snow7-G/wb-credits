@@ -1,0 +1,29 @@
+{
+  "name": "snow7g",
+  "owner": {
+    "name": "Snow7-G"
+  },
+  "description": "Snow7-G 的插件市场",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "wb-credits",
+      "source": "./plugins/wb-credits",
+      "description": "按会话查看 WorkBuddy 积分消耗。一键得到本对话的累计消耗、边际成本与异常提示，全部本地只读。",
+      "version": "0.1.0",
+      "author": {
+        "name": "Snow7-G"
+      },
+      "license": "MIT",
+      "keywords": [
+        "credits",
+        "usage",
+        "cost",
+        "billing",
+        "analytics",
+        "workbuddy"
+      ],
+      "category": "开发工作流"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "wb-credits",
+  "version": "0.1.0",
+  "description": "按会话查看 WorkBuddy 积分消耗。一键得到本对话的累计消耗、边际成本与异常提示，全部本地只读。",
+  "author": {
+    "name": "Snow7-G"
+  },
+  "license": "MIT",
+  "keywords": [
+    "credits",
+    "usage",
+    "cost",
+    "billing",
+    "analytics",
+    "workbuddy"
+  ],
+  "category": "开发工作流"
+}
