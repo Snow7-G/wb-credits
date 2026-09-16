@@ -133,11 +133,16 @@ class Store(object):
     # -- 会话 ------------------------------------------------------------
 
     def sessions(self):
-        """会话元信息，key 为 session_id。读取失败的字段降级为空。"""
+        """会话元信息，key 为 session_id。读取失败的字段降级为空。
+
+        只取真正会用到的列。多取一列就多一个版本不兼容的面——这个查询里
+        曾经带过 created_at，它既没被下游用过，又不在 REQUIRED_SCHEMA 里，
+        结果字段一缺就抛出 SQL 层的英文报错，漏过了那句人话提示。
+        """
         sql = """
             select id,
                    coalesce(nullif(custom_title, ''), title, ''),
-                   cwd, model, created_at, updated_at
+                   cwd, model, updated_at
             from sessions
         """
         out = {}
@@ -151,8 +156,7 @@ class Store(object):
                 "title": row[1] or "",
                 "cwd": row[2] or "",
                 "model": row[3] or "",
-                "created_at": row[4] or 0,
-                "updated_at": row[5] or 0,
+                "updated_at": row[4] or 0,
             }
         return out
 
@@ -294,69 +298,82 @@ class Store(object):
 
     @staticmethod
     def _scan_trace(path, out):
-        text = _read_trace_text(path)
-        if text is None:
+        for text in _read_trace_candidates(path):
+            parsed = _parse_trace(text)
+            if parsed is None:
+                continue
+            session_id, total_in, cached, total_out = parsed
+            entry = out.setdefault(
+                session_id,
+                {"input": 0, "cached": 0, "uncached": 0, "output": 0, "traces": 0},
+            )
+            entry["input"] += total_in
+            entry["cached"] += cached
+            entry["uncached"] += total_in - cached
+            entry["output"] += total_out
+            entry["traces"] += 1
             return
-
-        match = _SESSION_ID_RE.search(text)
-        if not match:
-            return
-        session_id = match.group(1)
-        if not session_id:
-            return
-
-        info = _extract_model_info(text)
-        if info is None:
-            return
-        try:
-            info = json.loads(info)
-        except ValueError:
-            return
-        if not isinstance(info, dict):
-            return
-
-        total_in = _as_int(info.get("totalInputTokens"))
-        cached = _as_int(info.get("totalCachedTokens"))
-        if cached > total_in:
-            cached = total_in
-        total_out = _as_int(info.get("totalOutputTokens"))
-
-        entry = out.setdefault(
-            session_id,
-            {"input": 0, "cached": 0, "uncached": 0, "output": 0, "traces": 0},
-        )
-        entry["input"] += total_in
-        entry["cached"] += cached
-        entry["uncached"] += total_in - cached
-        entry["output"] += total_out
-        entry["traces"] += 1
 
 
 TRACE_HEAD_BYTES = 65536
 
 _SESSION_ID_RE = re.compile(r'"sessionId"\s*:\s*"([^"]*)"')
 
+# 三个 token 字段一个都不存在，说明这条 trace 压根没记用量，跳过。
+# 不能拿 0 顶上——那会把「没记录」显示成「测量为 0」，用户没法分辨。
+_TOKEN_KEYS = ("totalInputTokens", "totalCachedTokens", "totalOutputTokens")
 
-def _read_trace_text(path):
-    """读 trace 文本，读不到或确认没有 sessionId 时返回 None。
 
-    快路径只读文件头：实测 571 个文件里 sessionId 的最大偏移是 318 字节、
-    modelInfo 是 387 字节（写入顺序固定，与数据量无关），所以头部足够。
+def _read_trace_candidates(path):
+    """依次产出候选文本：先文件头，头部解析不出来才给整份。
 
-    头部没有则读完整个文件再判一次，不能直接当成没有——字段一旦位移，
-    直接跳过会静默漏数据，而漏数据比报错更糟。
+    头部通常够用：实测 571 个文件里 sessionId 的最大偏移是 318 字节、
+    modelInfo 是 387 字节，写入顺序由序列化器固定，与数据量无关。
+
+    但 modelInfo 对象可能恰好跨过头部边界，只读头部会拿到半截 JSON。
+    所以做成生成器——调用方解析成功就 break，不会继续读剩余内容；解析失败
+    才回头读整份。既不牺牲速度，也不会静默漏掉一条 trace。
     """
     try:
         with open(path, "rb") as handle:
             head = handle.read(TRACE_HEAD_BYTES)
-            if b'"sessionId"' in head and b'"modelInfo"' in head:
-                return head.decode("utf-8", "ignore")
-            blob = head + handle.read()
+            if b'"sessionId"' in head:
+                yield head.decode("utf-8", "ignore")
+            rest = handle.read()
     except OSError:
-        return None
+        return
+
+    if not rest:
+        return
+    blob = head + rest
     if b'"sessionId"' not in blob:
+        return
+    yield blob.decode("utf-8", "ignore")
+
+
+def _parse_trace(text):
+    """从一份 trace 文本取出 (会话ID, 输入, 缓存, 输出)。取不到返回 None。"""
+    match = _SESSION_ID_RE.search(text)
+    if not match or not match.group(1):
         return None
-    return blob.decode("utf-8", "ignore")
+
+    raw = _extract_model_info(text)
+    if raw is None:
+        return None
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(info, dict):
+        return None
+    if not any(key in info for key in _TOKEN_KEYS):
+        return None
+
+    total_in = _as_int(info.get("totalInputTokens"))
+    cached = _as_int(info.get("totalCachedTokens"))
+    if cached > total_in:
+        cached = total_in
+    return match.group(1), total_in, cached, _as_int(info.get("totalOutputTokens"))
 
 
 def _extract_model_info(text):

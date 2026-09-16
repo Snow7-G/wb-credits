@@ -25,8 +25,11 @@ CARD_TEMPLATE = """<div style="background:var(--color-background-secondary);bord
   </div>
 {footer}</div>"""
 
-FOOTER_TEMPLATE = """  <div style="font-size:12px;color:var(--color-text-tertiary);margin-top:24px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary);">{anomaly}</div>
+FOOTER_TEMPLATE = """  <div style="font-size:12px;color:var(--color-text-tertiary);margin-top:24px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary);line-height:1.9;">{notes}</div>
 """
+
+# 明细解析失败时总数是偏低的。不标出来，用户会把这个数当成完整的。
+PARTIAL_NOTE = "用量明细有损坏，总数可能偏低"
 
 
 def card(summary):
@@ -36,9 +39,8 @@ def card(summary):
     if summary.get("in_flight"):
         label += "（本轮 %.2f 未定稿）" % summary["in_flight_value"]
 
-    footer = ""
-    if summary.get("anomaly"):
-        footer = FOOTER_TEMPLATE.format(anomaly=summary["anomaly"])
+    notes = _footer_notes(summary)
+    footer = FOOTER_TEMPLATE.format(notes="<br>".join(notes)) if notes else ""
 
     return CARD_TEMPLATE.format(
         total="%.2f" % summary["total"],
@@ -78,6 +80,16 @@ def _token_block(tokens):
             )
         )
     return TOKEN_BLOCK.format(rows="".join(rows))
+
+
+def _footer_notes(summary):
+    """底栏提示。没有可说的就返回空列表，不留空行。"""
+    notes = []
+    if summary.get("partial"):
+        notes.append(PARTIAL_NOTE)
+    if summary.get("anomaly"):
+        notes.append(summary["anomaly"])
+    return notes
 
 
 def _meta_line(summary):
@@ -136,9 +148,10 @@ def text(summary):
                 % (estimate["uncached"], estimate["cached"], estimate["output"])
             )
 
-    if summary.get("anomaly"):
+    notes = _footer_notes(summary)
+    if notes:
         lines.append("")
-        lines.append(summary["anomaly"])
+        lines.extend(notes)
     return "\n".join(lines)
 
 

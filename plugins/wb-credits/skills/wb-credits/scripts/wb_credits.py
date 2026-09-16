@@ -32,6 +32,21 @@ NO_SESSION_HINT = (
 )
 
 
+def _limit(text):
+    """--limit 的取值校验。
+
+    负数在切片里是「从尾部截断」，会静默少给几行——不报错，只是答案不对。
+    宁可在这里直接拒掉。
+    """
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("需要一个整数，收到 %r" % text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("不能为负数，收到 %d" % value)
+    return value
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="wb-credits",
@@ -59,7 +74,12 @@ def build_parser():
         action="store_true",
         help="按假设单价估算三类 token 的积分构成。结果为估算值，不是实测",
     )
-    parser.add_argument("--limit", type=int, default=15, help="排行显示条数")
+    parser.add_argument(
+        "--limit",
+        type=_limit,
+        default=15,
+        help="排行显示条数。0 表示不限，负数不接受",
+    )
     parser.add_argument(
         "--format",
         choices=("json", "text", "card"),
@@ -88,6 +108,12 @@ def run(args):
 
 
 def run_session(args, store, sessions):
+    if args.estimate and not args.tokens:
+        raise data.DataError(
+            "--estimate 需要 token 数据，不能和 --no-tokens 同用。\n"
+            "去掉 --no-tokens，或改成只看积分不带估算。"
+        )
+
     session_id = args.session or data.current_session_id()
     if not session_id:
         raise data.DataError(NO_SESSION_HINT)
@@ -105,6 +131,11 @@ def run_session(args, store, sessions):
     )
     meta = sessions.get(session_id) or {}
     detail = metrics.detail_lines(usage["credits"])
+
+    # 明细损坏时总数偏低。这个标记必须走到呈现层，否则用户拿到的是个被低估的数，
+    # 而且完全无从察觉。
+    if usage["partial"]:
+        summary["partial"] = True
 
     if args.tokens:
         raw = store.trace_tokens().get(session_id)
@@ -143,6 +174,12 @@ def run_session(args, store, sessions):
 
 
 def run_rank(args, store, sessions):
+    # 排行没有卡片模板。与其静默把 JSON 当卡片交出去，不如说清楚。
+    if args.format == "card":
+        raise data.DataError(
+            "排行不支持卡片输出。\n改用 --format text 或 --format json。"
+        )
+
     rows = metrics.rank(store.all_usage(), sessions)
     if args.kw:
         key = args.kw.lower()

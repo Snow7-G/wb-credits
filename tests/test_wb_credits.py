@@ -701,9 +701,38 @@ def test_tokens():
     store.close()
     got = agg.get("s1", {})
     check("字段越过头部时仍能读到", got.get("input") == 800, str(got))
-    check("越过头部时未漏文件", got.get("traces") == 3, str(got.get("traces")))
+    check("只统计有 token 字段的 trace", got.get("traces") == 2, str(got.get("traces")))
     check("spans 里的同名字段不被计入", got.get("input") != 1000799, str(got))
     check("字段顺序调换不影响结果", got.get("output") == 17, str(got))
+    check("modelInfo 无 token 字段的 trace 被跳过",
+          got.get("input") != 0 and "models" not in str(got))
+
+    # modelInfo 对象恰好跨过头部边界：只读头部会拿到半截 JSON。
+    # 这不是理论问题——实测构造出来时会整条 trace 被静默丢掉。
+    tmp5 = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    d5 = os.path.join(tmp5, "traces", "1")
+    os.makedirs(d5, exist_ok=True)
+    head_bytes = data.TRACE_HEAD_BYTES
+    pad = head_bytes - 86          # 让 modelInfo 的 { 落在头部内、} 落在头部外
+    body = ('{"trace":{"sessionId":"s1","metadata":{"pad":"' + "x" * pad + '"},'
+            '"modelInfo":{"totalInputTokens":900,"totalCachedTokens":800,'
+            '"totalOutputTokens":7}}}')
+    start = body.find('"modelInfo"')
+    end = body.rfind("}")
+    with open(os.path.join(d5, "trace_straddle.json"), "w", encoding="utf-8") as handle:
+        handle.write(body)
+
+    store = data.Store(config_dir=tmp5)
+    agg = store.trace_tokens()
+    store.close()
+    got5 = agg.get("s1", {})
+    check("构造样例确实跨过了头部边界",
+          start < head_bytes < end, "起点 %d 终点 %d 头部 %d" % (start, end, head_bytes))
+    check("对象跨头部边界时不丢 trace", got5.get("input") == 900, str(got5))
+    check("跨边界时数值完整", got5.get("cached") == 800 and got5.get("output") == 7, str(got5))
 
     tmp3 = make_store_dir(
         sessions=[("s1", "/tmp", "u", "x", None, "Done", 0, 0, "m")],
@@ -782,6 +811,25 @@ def test_cli_tokens():
     check("关掉 token 后顶部行不再出现比例",
           "缓存命中 " not in run_cli(["--format", "card", "--no-tokens"]).stdout)
 
+    # 明细损坏时总数偏低。不说出来，用户会把偏低的数当成完整的。
+    broken = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "损坏明细", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0, "b": ')],
+    )
+    result = run_cli(["--session", "s1", "--format", "json"], config_dir=broken)
+    payload = json.loads(result.stdout)
+    check("损坏明细被标记 partial", payload["partial"] is True, str(payload["partial"]))
+    check("partial 传到 summary", payload["summary"].get("partial") is True)
+
+    card = run_cli(["--session", "s1", "--format", "card"], config_dir=broken).stdout
+    check("卡片标出数据不完整", "损坏" in card, card[:120])
+    text_out = run_cli(["--session", "s1", "--format", "text"], config_dir=broken).stdout
+    check("纯文本标出数据不完整", "损坏" in text_out, text_out[:120])
+
+    # 正常数据不该出现这行
+    ok_card = run_cli(["--format", "card"]).stdout
+    check("数据正常时不出现不完整提示", "损坏" not in ok_card)
+
 
 # --------------------------------------------------------------------------
 # 10. 健壮性
@@ -844,10 +892,16 @@ def test_cli_limits():
     check("--limit 1 只返回一条", len(payload["rows"]) == 1, str(len(payload["rows"])))
 
     result = run_cli(["--all", "--format", "json", "--limit", "0"])
-    check("--limit 0 不崩", result.returncode == 0, result.stderr[:80])
+    payload = json.loads(result.stdout)
+    check("--limit 0 表示不限，返回全部",
+          result.returncode == 0 and len(payload["rows"]) == payload["count"],
+          "%d vs %d" % (len(payload["rows"]), payload["count"]))
 
+    # 负数在切片里是「从尾部截断」，会静默少给几行。必须直接拒掉。
     result = run_cli(["--all", "--format", "json", "--limit", "-1"])
-    check("负数 limit 不崩", result.returncode == 0, result.stderr[:80])
+    check("负数 limit 被拒", result.returncode != 0, "竟然成功了")
+    check("负数 limit 有说明",
+          "负数" in (result.stdout + result.stderr), (result.stdout + result.stderr)[:80])
 
     result = run_cli(["--all", "--format", "json", "--limit", "9999"])
     payload = json.loads(result.stdout)
@@ -856,6 +910,15 @@ def test_cli_limits():
 
     result = run_cli(["--no-such-flag"])
     check("未知参数非零退出", result.returncode != 0)
+
+    # 请求了卡片却悄悄给 JSON，等于答案不是要的那个
+    result = run_cli(["--all", "--format", "card"])
+    check("排行 + card 明确报错而非静默给 JSON",
+          result.returncode != 0 and "卡片" in result.stdout, result.stdout[:80])
+
+    result = run_cli(["--format", "json", "--no-tokens", "--estimate"])
+    check("--no-tokens 与 --estimate 冲突时报错",
+          result.returncode != 0 and "estimate" in result.stdout, result.stdout[:100])
 
 
 # --------------------------------------------------------------------------
