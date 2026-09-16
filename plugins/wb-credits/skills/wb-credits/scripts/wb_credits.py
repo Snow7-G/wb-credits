@@ -21,6 +21,11 @@ import render
 
 VERSION = "0.1.0"
 
+# Windows 控制台默认不是 UTF-8，中文会乱码甚至抛 UnicodeEncodeError。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 NO_SESSION_HINT = (
     "拿不到当前会话 ID。\n"
     "请通过 /credits 命令调用，或用 --session 指定会话 ID。"

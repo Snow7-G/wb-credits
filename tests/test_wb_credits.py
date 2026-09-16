@@ -1,0 +1,667 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""wb-credits 全量测试。
+
+真实数据只读；边界场景用临时构造的数据库，不触碰用户数据。
+
+直接运行：
+    python3 tests/test_wb_credits.py
+"""
+
+from __future__ import annotations
+
+import atexit
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS = os.path.join(ROOT, "plugins", "wb-credits", "skills", "wb-credits", "scripts")
+sys.path.insert(0, SCRIPTS)
+
+import data  # noqa: E402
+import metrics  # noqa: E402
+import render  # noqa: E402
+
+PY = sys.executable
+CLI = os.path.join(SCRIPTS, "wb_credits.py")
+
+PASSED = []
+FAILED = []
+
+
+def check(name, condition, detail=""):
+    if condition:
+        PASSED.append(name)
+        print("  ok    %s" % name)
+    else:
+        FAILED.append((name, detail))
+        print("  FAIL  %s  %s" % (name, detail))
+
+
+# --------------------------------------------------------------------------
+# 构造临时数据
+# --------------------------------------------------------------------------
+
+SESSIONS_DDL = """
+create table sessions (
+    id text primary key, cwd text, user_id text, title text,
+    custom_title text, status text, created_at integer, updated_at integer,
+    model text
+)
+"""
+
+USAGE_DDL = """
+create table session_usage (
+    session_id text primary key, used integer, size integer,
+    updated_at integer, credit_json text
+)
+"""
+
+
+TMP_DIRS = []
+
+
+def _cleanup_tmp():
+    for path in TMP_DIRS:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+atexit.register(_cleanup_tmp)
+
+
+def make_tmp():
+    path = tempfile.mkdtemp(prefix="wbcredits-")
+    TMP_DIRS.append(path)
+    return path
+
+
+def make_store_dir(sessions=None, usages=None, sessions_ddl=SESSIONS_DDL,
+                   usage_ddl=USAGE_DDL, name="workbuddy.db"):
+    tmp = make_tmp()
+    con = sqlite3.connect(os.path.join(tmp, name))
+    if sessions_ddl:
+        con.execute(sessions_ddl)
+    if usage_ddl:
+        con.execute(usage_ddl)
+    for row in sessions or []:
+        con.execute("insert into sessions values (?,?,?,?,?,?,?,?,?)", row)
+    for row in usages or []:
+        con.execute("insert into session_usage values (?,?,?,?,?)", row)
+    con.commit()
+    con.close()
+    return tmp
+
+
+def run_cli(args, config_dir=None, drop_env=()):
+    env = dict(os.environ)
+    if config_dir:
+        env["WORKBUDDY_CONFIG_DIR"] = config_dir
+        env.pop("CODEBUDDY_CONFIG_DIR", None)
+    for key in drop_env:
+        env.pop(key, None)
+    return subprocess.run(
+        [PY, CLI] + list(args), capture_output=True, text=True, env=env
+    )
+
+
+# --------------------------------------------------------------------------
+# 1. 静态检查
+# --------------------------------------------------------------------------
+
+def test_static():
+    print("\n[1] 静态检查")
+
+    import py_compile
+
+    ok = True
+    for name in ("data.py", "metrics.py", "render.py", "wb_credits.py"):
+        try:
+            py_compile.compile(os.path.join(SCRIPTS, name), doraise=True)
+        except py_compile.PyCompileError as exc:
+            ok = False
+            check("语法 %s" % name, False, str(exc))
+    if ok:
+        check("四个脚本语法均可编译", True)
+
+    for rel in (".codebuddy-plugin/marketplace.json",
+                "plugins/wb-credits/.codebuddy-plugin/plugin.json"):
+        path = os.path.join(ROOT, rel)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                json.load(handle)
+            check("JSON 合法 %s" % rel, True)
+        except Exception as exc:  # noqa: BLE001
+            check("JSON 合法 %s" % rel, False, str(exc))
+
+    manifest_path = os.path.join(ROOT, "plugins/wb-credits/.codebuddy-plugin/plugin.json")
+    with open(manifest_path, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+    name = manifest.get("name", "")
+    valid = name and name[0].isalpha() and name == name.lower() and " " not in name
+    check("插件名为合法 kebab-case", bool(valid), repr(name))
+
+    market_path = os.path.join(ROOT, ".codebuddy-plugin/marketplace.json")
+    with open(market_path, encoding="utf-8") as handle:
+        market = json.load(handle)
+    check("市场清单含 name/owner/plugins",
+          all(k in market for k in ("name", "owner", "plugins")))
+    entry = market["plugins"][0]
+    check("市场条目含 name/source/description",
+          all(k in entry for k in ("name", "source", "description")))
+    check("插件 source 为相对路径且以 ./ 开头",
+          isinstance(entry["source"], str) and entry["source"].startswith("./"),
+          repr(entry.get("source")))
+    target = os.path.normpath(os.path.join(ROOT, entry["source"]))
+    check("source 指向的目录真实存在", os.path.isdir(target), target)
+    check("source 目录含 plugin.json",
+          os.path.isfile(os.path.join(target, ".codebuddy-plugin", "plugin.json")))
+
+    for rel in ("commands/credits.md", "skills/wb-credits/SKILL.md"):
+        path = os.path.join(target, rel)
+        check("组件存在 %s" % rel, os.path.isfile(path), path)
+
+    with open(os.path.join(target, "commands/credits.md"), encoding="utf-8") as handle:
+        body = handle.read()
+    check("命令文件含 frontmatter", body.startswith("---"))
+    check("命令文件含 description", "description:" in body.split("---")[1])
+    check("命令文件含渲染硬要求", "必须调用可视化渲染工具" in body)
+
+    with open(os.path.join(target, "skills/wb-credits/SKILL.md"), encoding="utf-8") as handle:
+        skill = handle.read()
+    check("技能文件含 frontmatter", skill.startswith("---"))
+    check("技能文件含 name/description",
+          "name:" in skill.split("---")[1] and "description:" in skill.split("---")[1])
+
+    check("脚本目录无第三方依赖",
+          "import requests" not in open(os.path.join(SCRIPTS, "data.py"), encoding="utf-8").read())
+
+
+# --------------------------------------------------------------------------
+# 2. 数据层：正常路径
+# --------------------------------------------------------------------------
+
+def test_data_normal():
+    print("\n[2] 数据层 · 正常路径")
+
+    store = data.Store()
+    try:
+        sessions = store.sessions()
+        check("能读到会话表", isinstance(sessions, dict) and len(sessions) > 0,
+              "共 %d 个" % len(sessions))
+
+        usages = store.all_usage()
+        check("能读到用量表", len(usages) > 0, "共 %d 条" % len(usages))
+
+        sample = max(usages, key=lambda u: sum(u["credits"].values()))
+        check("积分字典非空", len(sample["credits"]) > 0)
+        check("积分值均为浮点",
+              all(isinstance(v, float) for v in sample["credits"].values()))
+
+        stamps = store.timestamps()
+        check("能读到审计日志时间戳", len(stamps) > 0, "共 %d 条" % len(stamps))
+
+        meta = sessions.get(sample["session_id"])
+        check("用量能关联到会话元信息", meta is not None)
+    finally:
+        store.close()
+
+    check("只读连接未产生写文件",
+          not os.path.exists(os.path.join(store.config_dir, "workbuddy.db-journal")))
+
+
+# --------------------------------------------------------------------------
+# 3. 数据层：边界与错误
+# --------------------------------------------------------------------------
+
+def test_data_errors():
+    print("\n[3] 数据层 · 边界与错误")
+
+    empty = make_tmp()
+    try:
+        data.Store(config_dir=empty)
+        check("空目录应抛 DataError", False, "未抛异常")
+    except data.DataError as exc:
+        check("空目录抛 DataError", True)
+        check("错误信息为人话且含路径提示",
+              "找不到数据库文件" in str(exc), str(exc)[:60])
+    except Exception as exc:  # noqa: BLE001
+        check("空目录抛 DataError", False, "抛了 %s" % type(exc).__name__)
+
+    only_sessions = make_store_dir(usage_ddl=None)
+    try:
+        data.Store(config_dir=only_sessions).sessions()
+        check("缺表应抛 DataError", False, "未抛异常")
+    except data.DataError as exc:
+        check("缺表抛 DataError", True)
+        check("缺表错误点名了 session_usage", "session_usage" in str(exc), str(exc)[:80])
+
+    bad_ddl = """
+    create table sessions (
+        id text primary key, cwd text, user_id text, title text,
+        custom_title text, status text, created_at integer, updated_at integer
+    )
+    """
+    missing_col = make_store_dir(sessions_ddl=bad_ddl)
+    try:
+        data.Store(config_dir=missing_col).sessions()
+        check("缺字段应抛 DataError", False, "未抛异常")
+    except data.DataError as exc:
+        check("缺字段抛 DataError", True)
+        check("缺字段错误点名了 model", "model" in str(exc), str(exc)[:80])
+
+    broken = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "坏数据会话", None, "Done", 0, 0, "m")],
+        usages=[("s1", 100, 1000, 0, "{not json")],
+    )
+    try:
+        store = data.Store(config_dir=broken)
+        usage = store.usage("s1")
+        check("credit_json 损坏时不抛异常", usage is not None)
+        check("损坏数据被标记 partial", usage["partial"] is True)
+        check("损坏数据降级为空积分", usage["credits"] == {})
+        store.close()
+    except Exception as exc:  # noqa: BLE001
+        check("credit_json 损坏时不抛异常", False, "%s" % exc)
+
+    wrong_type = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "类型异常", None, "Done", 0, 0, "m")],
+        usages=[("s1", 100, 1000, 0, '{"a": "not-a-number", "b": 2.5}')],
+    )
+    store = data.Store(config_dir=wrong_type)
+    usage = store.usage("s1")
+    check("非数字积分被丢弃", "a" not in usage["credits"])
+    check("合法积分被保留", usage["credits"].get("b") == 2.5)
+    check("类型异常标记 partial", usage["partial"] is True)
+    store.close()
+
+    empty_usage = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "空用量", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, None)],
+    )
+    store = data.Store(config_dir=empty_usage)
+    usage = store.usage("s1")
+    check("credit_json 为空时返回空字典", usage["credits"] == {})
+    check("空用量不算 partial", usage["partial"] is False)
+    store.close()
+
+    store = data.Store(config_dir=empty_usage)
+    check("查询不存在的会话返回 None", store.usage("nope") is None)
+    store.close()
+
+
+# --------------------------------------------------------------------------
+# 4. 计算层
+# --------------------------------------------------------------------------
+
+def test_metrics():
+    print("\n[4] 计算层")
+
+    credits = {"r1": 3.0, "r2": 2.0, "r3": 1.0}
+    summary = metrics.summarize(credits, used=12345, size=1000000)
+    check("累计积分正确", abs(summary["total"] - 6.0) < 1e-9, str(summary["total"]))
+    check("轮次正确", summary["rounds"] == 3)
+    check("最近三轮取全部", summary["recent"] == [3.0, 2.0, 1.0])
+    check("边际成本为均值", abs(summary["marginal"] - 2.0) < 1e-9)
+    check("预估值 = 边际 × 10", abs(summary["forecast"]["credits"] - 20.0) < 1e-9)
+    check("上下文格式化为万", metrics.fmt_context(12345) == "1 万")
+
+    big = {"r%d" % i: 1.0 for i in range(10)}
+    summary = metrics.summarize(big)
+    check("最近三轮只取尾部", summary["recent"] == [1.0, 1.0, 1.0])
+    check("十轮合计正确", abs(summary["total"] - 10.0) < 1e-9)
+
+    in_flight = {"r1": 5.0, "r2": 4.0, "r3": 3.0, "r4": 0.5}
+    summary = metrics.summarize(in_flight, current_request_id="r4")
+    check("在进行中的轮次不计入边际成本",
+          abs(summary["marginal"] - 4.0) < 1e-9, str(summary["marginal"]))
+    check("标记了 in_flight", summary["in_flight"] is True)
+    check("在进行中的轮次仍计入累计",
+          abs(summary["total"] - 12.5) < 1e-9, str(summary["total"]))
+
+    summary = metrics.summarize({})
+    check("空数据不崩", summary["total"] == 0.0 and summary["rounds"] == 0)
+    check("空数据边际成本为 0", summary["marginal"] == 0.0)
+    check("空数据异常提示为空", summary["anomaly"] is None)
+
+    check("时间格式化为 HH:MM", metrics.fmt_clock(1789540180559).count(":") == 1)
+    check("间隔格式化含 h",
+          metrics.fmt_gap(2 * 3600 * 1000 + 19 * 60 * 1000) == "2h19m")
+    check("一小时以内显示分钟", metrics.fmt_gap(45 * 60 * 1000) == "45m")
+    check("小于一万不带万", metrics.fmt_context(9999) == "9999")
+
+
+def test_anomaly():
+    print("\n[5] 异常识别")
+
+    base = 1789540000000
+    gap = 2 * 3600 * 1000 + 19 * 60 * 1000
+    items = [("a", 0.5), ("b", 0.6), ("c", 0.7), ("d", 0.8), ("e", 5.18)]
+    stamps = {
+        "a": base,
+        "b": base + 1000,
+        "c": base + 2000,
+        "d": base + 3000,
+        "e": base + 3000 + gap,
+    }
+    hint = metrics.find_anomaly(items, stamps)
+    check("能识别闲置后变贵的轮次", hint is not None and "闲置" in hint, str(hint))
+    check("提示含具体数值", hint is not None and "5.18" in hint, str(hint))
+    check("提示含小时分钟", hint is not None and "2h19m" in hint, str(hint))
+
+    dense = dict(stamps)
+    dense["e"] = base + 4000
+    check("间隔不足 30 分钟不提示",
+          metrics.find_anomaly(items, dense) is None)
+
+    flat = [("a", 1.0), ("b", 1.0), ("c", 1.0)]
+    flat_stamps = {"a": base, "b": base + 1000, "c": base + 1000 + gap}
+    check("无突增时不提示", metrics.find_anomaly(flat, flat_stamps) is None)
+
+    check("少于三轮不提示",
+          metrics.find_anomaly([("a", 1.0), ("b", 9.0)], {"a": base, "b": base + gap}) is None)
+    check("无时间戳不提示", metrics.find_anomaly(items, {}) is None)
+
+    zero = [("a", 0.0), ("b", 0.0), ("c", 5.0)]
+    zero_stamps = {"a": base, "b": base + 1, "c": base + 1 + gap}
+    check("中位数为 0 时不误报",
+          metrics.find_anomaly(zero, zero_stamps) is None)
+
+    no_stamp_items = [("a", 0.5), ("b", 0.6), ("c", 5.0)]
+    check("峰值缺时间戳时不提示",
+          metrics.find_anomaly(no_stamp_items, {"a": base, "b": base + 1}) is None)
+
+
+# --------------------------------------------------------------------------
+# 6. 呈现层
+# --------------------------------------------------------------------------
+
+def test_render():
+    print("\n[6] 呈现层")
+
+    summary = metrics.summarize(
+        {"r1": 1.0, "r2": 2.0, "r3": 3.0}, used=260000, size=1000000
+    )
+    card = render.card(summary)
+
+    check("卡片含累计值", "6.00" in card)
+    check("卡片含分隔符 ｜", "｜" in card)
+    check("卡片不使用 · 作为分隔", "·" not in card)
+    check("卡片走主题变量", "--color-background-secondary" in card
+          and "--color-text-primary" in card)
+    check("卡片无硬编码色值", "#" not in card)
+    check("卡片无渐变与阴影",
+          "gradient" not in card and "box-shadow" not in card)
+    check("卡片用 grid 两栏", "grid-template-columns" in card)
+    check("卡片含 minmax 防溢出", "minmax(0,1fr)" in card)
+    check("卡片字号均不小于 11px",
+          all(int(s.replace("px", "")) >= 11
+              for s in _extract_font_sizes(card)),
+          str(_extract_font_sizes(card)))
+
+    plain = render.text(summary)
+    check("纯文本含累计值", "6.00" in plain)
+    check("纯文本含最近三轮", "1.00" in plain and "3.00" in plain)
+    check("纯文本两栏对齐（首行含右侧标签）", "最近三轮" in plain.splitlines()[0])
+    check("纯文本不使用 · 作为分隔", "·" not in plain)
+
+    empty = render.text(metrics.summarize({}))
+    check("空数据纯文本不崩", "0.00" in empty)
+
+    check("排行空列表给人话", "没有找到" in render.rank_text([]))
+    check("明细空列表给人话", "没有用量记录" in render.detail_text([]))
+
+    rows = [{"title": "中文标题测试", "rounds": 3, "used": 12000, "total": 9.5}]
+    text = render.rank_text(rows)
+    check("排行文本可渲染", "中文标题测试" in text and "9.50" in text)
+
+    wide = render.rank_text([{"title": "超长" * 30, "rounds": 1, "used": 100, "total": 1.0}])
+    check("超长标题不崩", isinstance(wide, str) and len(wide) > 0)
+
+
+def _extract_font_sizes(html):
+    sizes = []
+    cursor = 0
+    while True:
+        found = html.find("font-size:", cursor)
+        if found == -1:
+            return sizes
+        start = found + len("font-size:")
+        end = html.find(";", start)
+        sizes.append(html[start:end].strip())
+        cursor = end
+
+
+# --------------------------------------------------------------------------
+# 7. 命令行
+# --------------------------------------------------------------------------
+
+def test_cli():
+    print("\n[7] 命令行")
+
+    real = subprocess.run([PY, CLI, "--version"], capture_output=True, text=True)
+    check("--version 可用", real.returncode == 0 and "wb-credits" in real.stdout)
+
+    real = subprocess.run([PY, CLI, "--help"], capture_output=True, text=True)
+    check("--help 可用", real.returncode == 0 and "--all" in real.stdout)
+
+    result = run_cli(["--format", "text"])
+    check("默认本对话 text 输出成功", result.returncode == 0, result.stderr[:120])
+    check("本对话输出含标签", "本对话" in result.stdout)
+    check("本对话输出含最近三轮", "最近三轮" in result.stdout)
+
+    result = run_cli(["--format", "card"])
+    check("card 格式输出 HTML", result.returncode == 0 and "<div" in result.stdout)
+    check("card 格式不含其他内容", "ok" not in result.stdout)
+
+    result = run_cli([])
+    check("默认 json 格式可解析", result.returncode == 0)
+    try:
+        payload = json.loads(result.stdout)
+        check("json 含 ok/kind/summary/card",
+              all(k in payload for k in ("ok", "kind", "summary", "card")))
+        check("json 的 kind 为 session", payload.get("kind") == "session")
+        check("json 的 card 为字符串", isinstance(payload.get("card"), str))
+    except ValueError as exc:
+        check("默认 json 格式可解析", False, str(exc))
+
+    result = run_cli(["--all", "--format", "json", "--limit", "3"])
+    check("--all 输出成功", result.returncode == 0, result.stderr[:120])
+    payload = json.loads(result.stdout)
+    check("排行条目数受限", len(payload["rows"]) <= 3, str(len(payload["rows"])))
+    check("排行按积分降序",
+          all(payload["rows"][i]["total"] >= payload["rows"][i + 1]["total"]
+              for i in range(len(payload["rows"]) - 1)))
+
+    result = run_cli(["--all", "--format", "text", "--limit", "3"])
+    check("排行文本输出成功", result.returncode == 0 and "共" in result.stdout)
+
+    result = run_cli(["--all", "-k", "不存在的关键词zzz", "--format", "json"])
+    payload = json.loads(result.stdout)
+    check("关键词无匹配时返回空列表", payload["rows"] == [])
+    check("无匹配时文本给人话",
+          "没有找到" in run_cli(["--all", "-k", "zzz不存在", "--format", "text"]).stdout)
+
+    result = run_cli(["--detail", "--format", "json"])
+    payload = json.loads(result.stdout)
+    check("--detail 返回明细", "detail" in payload and len(payload["detail"]) > 0)
+
+    result = run_cli(["--detail", "--format", "text"])
+    check("--detail 文本含明细", "#1" in result.stdout)
+
+
+def test_cli_errors():
+    print("\n[8] 命令行 · 错误处理")
+
+    result = run_cli(["--session", "deadbeef-0000", "--format", "text"])
+    check("不存在的会话退出码为 1", result.returncode == 1)
+    check("不存在的会话给人话", "还没有用量记录" in result.stderr, result.stderr[:80])
+    check("错误不走 stdout", result.stdout.strip() == "")
+
+    result = run_cli(["--session", "deadbeef-0000"])
+    check("错误 json 格式可解析", result.returncode == 1)
+    payload = json.loads(result.stdout)
+    check("错误 json 含 ok=false", payload.get("ok") is False)
+    check("错误 json 含 error 字段", bool(payload.get("error")))
+
+    result = run_cli([], drop_env=("CODEBUDDY_SESSION_ID",))
+    check("无会话 ID 时退出码为 1", result.returncode == 1)
+    payload = json.loads(result.stdout)
+    check("无会话 ID 时提示用 --session",
+          "session" in payload.get("error", ""), payload.get("error", "")[:80])
+
+    empty = make_tmp()
+    result = run_cli([], config_dir=empty)
+    check("数据目录无效时退出码为 1", result.returncode == 1)
+    payload = json.loads(result.stdout)
+    message = payload.get("error", "")
+    check("数据目录无效时给人话且不含堆栈",
+          "workbuddy.db" in message and "Traceback" not in message, message[:80])
+    check("显式指定的无效目录不回退到默认目录",
+          "WORKBUDDY_CONFIG_DIR" in message, message[:80])
+
+    result = run_cli([], drop_env=("CODEBUDDY_SESSION_ID", "CODEBUDDY_CONVERSATION_REQUEST_ID"))
+    check("缺少全部环境变量时仍能给出人话提示",
+          result.returncode == 1 and "error" in result.stdout)
+
+
+# --------------------------------------------------------------------------
+# 9. 端到端一致性
+# --------------------------------------------------------------------------
+
+def test_cross_check():
+    print("\n[9] 端到端一致性")
+
+    store = data.Store()
+    session_id = data.current_session_id()
+    if not session_id:
+        usages = store.all_usage()
+        session_id = max(usages, key=lambda u: sum(u["credits"].values()))["session_id"]
+
+    usage = store.usage(session_id)
+    expected = round(sum(usage["credits"].values()), 2)
+    store.close()
+
+    result = run_cli(["--session", session_id, "--format", "json"])
+    payload = json.loads(result.stdout)
+    actual = round(payload["summary"]["total"], 2)
+    check("CLI 累计值与直接查库一致", abs(actual - expected) < 0.011,
+          "CLI %.2f vs 直查 %.2f" % (actual, expected))
+    check("CLI 轮次数与直查一致",
+          payload["summary"]["rounds"] == len(usage["credits"]))
+
+    text_out = run_cli(["--session", session_id, "--format", "text"]).stdout
+    card_out = run_cli(["--session", session_id, "--format", "card"]).stdout
+    check("text 与 json 数值一致", ("%.2f" % expected) in text_out)
+    check("card 与 json 数值一致", ("%.2f" % expected) in card_out)
+
+
+# --------------------------------------------------------------------------
+# 10. 健壮性
+# --------------------------------------------------------------------------
+
+def test_robustness():
+    print("\n[10] 健壮性")
+
+    summary = metrics.summarize({"a": 0.1, "b": 0.2})
+    check("浮点求和无长尾数", summary["total"] == 0.3, str(summary["total"]))
+
+    tmp = make_store_dir(
+        sessions=[("s1", "/tmp", "u", "时间戳异常", None, "Done", 0, 0, "m")],
+        usages=[("s1", 0, 1000, 0, '{"a": 1.0}')],
+    )
+    log_dir = os.path.join(tmp, "audit-log")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "2026-01-01.jsonl"), "w", encoding="utf-8") as handle:
+        handle.write('{"requestId": "a", "timestamp": "1789540180559"}\n')
+        handle.write('{"requestId": "c", "timestamp": true}\n')
+        handle.write('{"requestId": "d", "timestamp": 0}\n')
+        handle.write('{"requestId": "e", "timestamp": 1789540180559}\n')
+        handle.write("这一行不是 JSON\n")
+        handle.write('{"没有requestId": 1}\n')
+        handle.write("\n")
+
+    store = data.Store(config_dir=tmp)
+    stamps = store.timestamps()
+    check("字符串时间戳被忽略", "a" not in stamps)
+    check("布尔时间戳被忽略", "c" not in stamps)
+    check("零时间戳被忽略", "d" not in stamps)
+    check("合法时间戳被保留", stamps.get("e") == 1789540180559)
+    check("损坏行与缺字段行被跳过", len(stamps) == 1, str(stamps))
+    store.close()
+
+    os.makedirs(os.path.join(log_dir, "spool"), exist_ok=True)
+    store = data.Store(config_dir=tmp)
+    check("空 spool 目录不报错", isinstance(store.timestamps(), dict))
+    store.close()
+
+    with open(os.path.join(log_dir, "spool", "s1.jsonl"), "w", encoding="utf-8") as handle:
+        handle.write('{"requestId": "f", "timestamp": 1789540199999}\n')
+    store = data.Store(config_dir=tmp)
+    stamps = store.timestamps()
+    check("spool 中的记录被读到", stamps.get("f") == 1789540199999)
+    store.close()
+
+    odd = metrics.summarize({"a": float("nan"), "b": 1.0, "c": 1.0})
+    check("NaN 不导致崩溃", isinstance(odd["total"], float))
+
+
+# --------------------------------------------------------------------------
+# 11. 参数边界
+# --------------------------------------------------------------------------
+
+def test_cli_limits():
+    print("\n[11] 参数边界")
+
+    payload = json.loads(run_cli(["--all", "--format", "json", "--limit", "1"]).stdout)
+    check("--limit 1 只返回一条", len(payload["rows"]) == 1, str(len(payload["rows"])))
+
+    result = run_cli(["--all", "--format", "json", "--limit", "0"])
+    check("--limit 0 不崩", result.returncode == 0, result.stderr[:80])
+
+    result = run_cli(["--all", "--format", "json", "--limit", "-1"])
+    check("负数 limit 不崩", result.returncode == 0, result.stderr[:80])
+
+    result = run_cli(["--all", "--format", "json", "--limit", "9999"])
+    payload = json.loads(result.stdout)
+    check("超大 limit 不崩",
+          result.returncode == 0 and payload["count"] >= len(payload["rows"]))
+
+    result = run_cli(["--no-such-flag"])
+    check("未知参数非零退出", result.returncode != 0)
+
+
+# --------------------------------------------------------------------------
+
+def main():
+    print("=" * 60)
+    print("wb-credits 全量测试")
+    print("=" * 60)
+
+    for test in (test_static, test_data_normal, test_data_errors, test_metrics,
+                 test_anomaly, test_render, test_cli, test_cli_errors,
+                 test_cross_check, test_robustness, test_cli_limits):
+        try:
+            test()
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+            FAILED.append((test.__name__, "测试函数自身抛异常"))
+            print("  FAIL  %s 抛异常：%s" % (test.__name__, exc))
+            traceback.print_exc()
+
+    print("\n" + "=" * 60)
+    print("通过 %d 项，失败 %d 项" % (len(PASSED), len(FAILED)))
+    if FAILED:
+        print("\n失败明细：")
+        for name, detail in FAILED:
+            print("  - %s  %s" % (name, detail))
+    print("=" * 60)
+    return 1 if FAILED else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

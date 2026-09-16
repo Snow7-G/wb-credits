@@ -33,11 +33,20 @@ class DataError(Exception):
 
 
 def find_config_dir():
-    """定位配置目录。优先环境变量，其次常见默认路径。"""
+    """定位配置目录。
+
+    环境变量显式指定时不回退：路径无效就直接报错。
+    静默回退到别的目录会用错数据，比直接报错糟糕。
+    """
     for var in ("WORKBUDDY_CONFIG_DIR", "CODEBUDDY_CONFIG_DIR"):
         path = os.environ.get(var)
-        if path and os.path.isfile(os.path.join(path, "workbuddy.db")):
-            return path
+        if path:
+            if os.path.isfile(os.path.join(path, "workbuddy.db")):
+                return path
+            raise DataError(
+                "环境变量 %s 指向的目录里没有 workbuddy.db：%s\n"
+                "如果这是误设，请取消该环境变量。" % (var, path)
+            )
     for path in DEFAULT_CONFIG_DIRS:
         if os.path.isfile(os.path.join(path, "workbuddy.db")):
             return path
@@ -53,6 +62,8 @@ class Store(object):
     def __init__(self, config_dir=None):
         self.config_dir = config_dir or find_config_dir()
         self.db_path = os.path.join(self.config_dir, "workbuddy.db")
+        if not os.path.isfile(self.db_path):
+            raise DataError("找不到数据库文件：%s" % self.db_path)
         self._con = None
 
     # -- 连接 ------------------------------------------------------------
@@ -241,7 +252,11 @@ class Store(object):
                     continue
                 rid = obj.get("requestId")
                 ts = obj.get("timestamp")
-                if rid and ts and rid not in out:
+                if not rid or rid in out:
+                    continue
+                if isinstance(ts, bool) or not isinstance(ts, (int, float)):
+                    continue
+                if ts > 0:
                     out[rid] = ts
 
 

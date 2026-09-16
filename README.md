@@ -50,6 +50,14 @@ python3 plugins/wb-credits/skills/wb-credits/scripts/wb_credits.py --all --forma
 
 只依赖 Python 标准库，无需安装依赖。
 
+## 运行测试
+
+```bash
+python3 tests/test_wb_credits.py
+```
+
+真实数据只读；边界场景用临时构造的数据库，不触碰你的数据。
+
 ## 数据从哪来
 
 本机 `~/.workbuddy/workbuddy.db`，两张表：

@@ -20,6 +20,11 @@ IDLE_THRESHOLD_MS = 30 * 60 * 1000
 FORECAST_ROUNDS = 10
 
 
+def _round(value):
+    """浮点累加会留下 0.30000000000000004 这类尾数，输出前收敛。"""
+    return round(value, 4)
+
+
 def summarize(credits, used=0, size=0, timestamps=None, current_request_id=""):
     """单会话汇总。
 
@@ -37,18 +42,18 @@ def summarize(credits, used=0, size=0, timestamps=None, current_request_id=""):
     in_flight = bool(current_request_id) and current_request_id in credits
 
     return {
-        "total": sum(values),
+        "total": _round(sum(values)),
         "rounds": len(items),
         "used": used,
         "size": size,
-        "recent": values[-RECENT_WINDOW:],
-        "marginal": marginal,
+        "recent": [_round(value) for value in values[-RECENT_WINDOW:]],
+        "marginal": _round(marginal),
         "forecast": {
             "rounds": FORECAST_ROUNDS,
-            "credits": marginal * FORECAST_ROUNDS,
+            "credits": _round(marginal * FORECAST_ROUNDS),
         },
         "in_flight": in_flight,
-        "in_flight_value": credits.get(current_request_id, 0.0) if in_flight else 0.0,
+        "in_flight_value": _round(credits.get(current_request_id, 0.0)) if in_flight else 0.0,
         "anomaly": find_anomaly(items, timestamps),
     }
 
@@ -104,7 +109,7 @@ def rank(usages, sessions):
                 "model": meta.get("model") or "",
                 "used": usage["used"],
                 "rounds": len(usage["credits"]),
-                "total": sum(usage["credits"].values()),
+                "total": _round(sum(usage["credits"].values())),
                 "updated_at": usage["updated_at"],
             }
         )
